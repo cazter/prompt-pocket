@@ -885,7 +885,8 @@ export class PromptPocketPanel {
 			transition: opacity var(--transition);
 		}
 
-		.prompt-item:hover .prompt-item-actions {
+		.prompt-item:hover .prompt-item-actions,
+		.prompt-item.selected .prompt-item-actions {
 			opacity: 1;
 		}
 
@@ -1616,7 +1617,7 @@ export class PromptPocketPanel {
 				groupsSidebarWidth: 220,
 				groupsSidebarSize: 'md'
 			},
-			config: { showCopyNotification: true, confirmDelete: true },
+			config: { showCopyNotification: true, confirmDelete: true, modalClickOutsideToClose: true },
 			selectedPromptIndex: -1,
 			editingPrompt: null,
 			editingPromptGroupId: null,
@@ -2103,12 +2104,11 @@ export class PromptPocketPanel {
 
 		function removeFileMention(filePath) {
 			if (!elements.promptContent) return;
-			const content = elements.promptContent.value;
-			// Remove @filepath (and trailing space if present)
-			// Escape special regex characters in the file path
-			const escaped = filePath.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
-			const regex = new RegExp('@' + escaped + '\\\\s?', 'g');
-			elements.promptContent.value = content.replace(regex, '');
+			let content = elements.promptContent.value;
+			// Remove @filepath with or without trailing space (simple string replace)
+			content = content.split('@' + filePath + ' ').join('');
+			content = content.split('@' + filePath).join('');
+			elements.promptContent.value = content;
 			updateAttachedFiles();
 		}
 
@@ -2528,14 +2528,12 @@ export class PromptPocketPanel {
 
 		elements.groupModalDelete.addEventListener('click', () => {
 			if (state.editingGroup) {
-				if (!state.config.confirmDelete || confirm('Delete this group and all its prompts?')) {
-					vscode.postMessage({ type: 'deleteGroup', groupId: state.editingGroup.id });
-					if (state.uiState.selectedGroupId === state.editingGroup.id) {
-						state.uiState.selectedGroupId = null;
-						vscode.postMessage({ type: 'selectGroup', groupId: null });
-					}
-					closeGroupModal(true);
+				vscode.postMessage({ type: 'deleteGroup', groupId: state.editingGroup.id });
+				if (state.uiState.selectedGroupId === state.editingGroup.id) {
+					state.uiState.selectedGroupId = null;
+					vscode.postMessage({ type: 'selectGroup', groupId: null });
 				}
+				closeGroupModal(true);
 			}
 		});
 
@@ -2796,9 +2794,7 @@ export class PromptPocketPanel {
 
 			if (deleteBtn) {
 				e.stopPropagation();
-				if (!state.config.confirmDelete || confirm('Delete this prompt?')) {
-					vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
-				}
+				vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
 				return;
 			}
 
@@ -2939,9 +2935,7 @@ export class PromptPocketPanel {
 					break;
 				}
 				case 'delete':
-					if (!state.config.confirmDelete || confirm('Delete this prompt?')) {
-						vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
-					}
+					vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
 					break;
 			}
 			hideContextMenu();

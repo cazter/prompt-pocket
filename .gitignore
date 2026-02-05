@@ -34,3 +34,9 @@ next-env.d.ts
 
 # VS Code test
 .vscode-test/
+
+# Compiled JavaScript files in source directories
+test/**/*.js
+test/**/*.js.map
+src/**/*.js
+src/**/*.js.map

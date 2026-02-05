@@ -3,7 +3,7 @@
   "displayName": "Prompt Pocket",
   "description": "A lightweight VS Code extension for organizing and quickly copying reusable prompts",
   "version": "0.1.0",
-  "publisher": "prompt-pocket",
+  "publisher": "cazter",
   "author": {
     "name": "Brent Allen"
   },
@@ -33,13 +33,14 @@
     "type": "git",
     "url": "https://github.com/cazter/prompt-pocket.git"
   },
+  "icon": "resources/icon-large.png",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "prompt-pocket",
           "title": "Prompt Pocket",
-          "icon": "resources/icon.svg"
+          "icon": "resources/icon.png"
         }
       ]
     },

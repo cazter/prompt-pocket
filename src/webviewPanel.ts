@@ -112,6 +112,11 @@ export class PromptPocketPanel {
 			}
 		);
 
+		// Set the panel icon
+		panel.iconPath = vscode.Uri.file(
+			path.join(context.extensionPath, 'resources', 'icon.png')
+		);
+
 		PromptPocketPanel.currentPanel = new PromptPocketPanel(panel, storage, context);
 	}
 

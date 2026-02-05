@@ -1,6 +1,10 @@
-# Prompt Pocket
+<div align="center">
+
+![Prompt Pocket](media/logo/logo.png)
 
 A lightweight VS Code extension for organizing and quickly copying reusable prompts. Perfect for AI interactions, code snippets, and templates.
+
+</div>
 
 ![Prompt Pocket Interface](media/ui_preview.png)
 

@@ -1906,6 +1906,9 @@ export class PromptPocketPanel {
 						<div class="group-color-dot" style="\${colorStyle}"></div>
 						<span class="group-name">\${escapeHtml(group.name)}</span>
 						<div class="group-actions">
+							<button class="btn btn-ghost btn-icon-sm create-subgroup-btn" title="Create Subgroup">
+								<span class="icon">${Icons.addGroup}</span>
+							</button>
 							<button class="btn btn-ghost btn-icon-sm edit-group-btn" title="Edit">
 								<span class="icon">${Icons.edit}</span>
 							</button>
@@ -2586,6 +2589,21 @@ export class PromptPocketPanel {
 				return;
 			}
 
+			const createSubgroupBtn = e.target.closest('.create-subgroup-btn');
+
+			if (createSubgroupBtn && groupItem) {
+				e.stopPropagation();
+				const groupId = groupItem.dataset.groupId;
+				if (groupId) {
+					vscode.postMessage({
+						type: 'createGroup',
+						name: 'New Subgroup',
+						parentId: groupId
+					});
+				}
+				return;
+			}
+
 			const editBtn = e.target.closest('.edit-group-btn');
 
 			if (editBtn && groupItem) {
@@ -2654,6 +2672,10 @@ export class PromptPocketPanel {
 		elements.groupsList.addEventListener('dragstart', (e) => {
 			const groupItem = e.target.closest('.group-item');
 			if (groupItem && !groupItem.classList.contains('all-prompts')) {
+				// Hide any visible overlays when starting to drag
+				hideTooltip();
+				hideMentionMenu();
+				hideContextMenu();
 				state.draggedGroup = groupItem.dataset.groupId;
 				e.dataTransfer.effectAllowed = 'move';
 				e.stopPropagation();
@@ -2848,6 +2870,10 @@ export class PromptPocketPanel {
 		elements.promptList.addEventListener('dragstart', (e) => {
 			const promptItem = e.target.closest('.prompt-item');
 			if (promptItem) {
+				// Hide any visible overlays when starting to drag
+				hideTooltip();
+				hideMentionMenu();
+				hideContextMenu();
 				state.draggedPrompt = promptItem.dataset.promptId;
 				state.draggedPromptGroupId = promptItem.dataset.groupId;
 				promptItem.classList.add('dragging');

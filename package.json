@@ -2,7 +2,7 @@
   "name": "prompt-pocket",
   "displayName": "Prompt Pocket",
   "description": "A lightweight VS Code extension for organizing and quickly copying reusable prompts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "cazter",
   "author": {
     "name": "Brent Allen"

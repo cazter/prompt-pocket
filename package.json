@@ -1,43 +1,283 @@
 {
   "name": "prompt-pocket",
   "displayName": "Prompt Pocket",
-  "description": "A VS Code extension for managing prompts",
-  "version": "0.0.1",
+  "description": "A lightweight VS Code extension for organizing and quickly copying reusable prompts",
+  "version": "0.1.0",
+  "publisher": "prompt-pocket",
+  "author": {
+    "name": "Brent Allen"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@9.12.3",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Snippets",
     "Other"
   ],
-  "activationEvents": [],
+  "keywords": [
+    "prompts",
+    "snippets",
+    "productivity",
+    "clipboard",
+    "ai",
+    "templates"
+  ],
+  "activationEvents": [
+    "onView:prompt-pocket-view",
+    "onCommand:prompt-pocket.openPanel"
+  ],
   "main": "./out/src/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cazter/prompt-pocket.git"
+  },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "prompt-pocket",
+          "title": "Prompt Pocket",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "prompt-pocket": [
+        {
+          "id": "prompt-pocket-view",
+          "name": "Prompts",
+          "when": "true"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "prompt-pocket.helloWorld",
-        "title": "Hello World"
+        "command": "prompt-pocket.openPanel",
+        "title": "Open Prompt Pocket",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "prompt-pocket.copyPrompt",
+        "title": "Copy Prompt",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "prompt-pocket.createGroup",
+        "title": "New Group",
+        "icon": "$(add-folder)"
+      },
+      {
+        "command": "prompt-pocket.createSubgroup",
+        "title": "New Subgroup"
+      },
+      {
+        "command": "prompt-pocket.createPrompt",
+        "title": "New Prompt",
+        "icon": "$(add)"
+      },
+      {
+        "command": "prompt-pocket.renameGroup",
+        "title": "Rename"
+      },
+      {
+        "command": "prompt-pocket.renamePrompt",
+        "title": "Rename"
+      },
+      {
+        "command": "prompt-pocket.editPrompt",
+        "title": "Edit Content"
+      },
+      {
+        "command": "prompt-pocket.deleteGroup",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "prompt-pocket.deletePrompt",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "prompt-pocket.copyPromptFromPalette",
+        "title": "Copy Prompt from Prompt Pocket"
+      },
+      {
+        "command": "prompt-pocket.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "prompt-pocket.export",
+        "title": "Export Prompts to File",
+        "icon": "$(export)"
+      },
+      {
+        "command": "prompt-pocket.import",
+        "title": "Import Prompts from File",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "prompt-pocket.duplicatePrompt",
+        "title": "Duplicate Prompt"
+      },
+      {
+        "command": "prompt-pocket.duplicateGroup",
+        "title": "Duplicate Group"
+      },
+      {
+        "command": "prompt-pocket.search",
+        "title": "Search Prompts"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "prompt-pocket.openPanel",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
+      },
+      {
+        "command": "prompt-pocket.copyPromptFromPalette",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c"
+      }
+    ],
+    "configuration": {
+      "title": "Prompt Pocket",
+      "properties": {
+        "promptPocket.showCopyNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a prompt is copied to clipboard"
+        },
+        "promptPocket.defaultView": {
+          "type": "string",
+          "enum": [
+            "panel",
+            "sidebar"
+          ],
+          "default": "panel",
+          "description": "Default view when opening Prompt Pocket"
+        },
+        "promptPocket.confirmDelete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show confirmation dialog before deleting prompts or groups"
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "prompt-pocket.openPanel",
+          "when": "view == prompt-pocket-view",
+          "group": "navigation"
+        },
+        {
+          "command": "prompt-pocket.createGroup",
+          "when": "view == prompt-pocket-view",
+          "group": "navigation"
+        },
+        {
+          "command": "prompt-pocket.refresh",
+          "when": "view == prompt-pocket-view",
+          "group": "navigation"
+        },
+        {
+          "command": "prompt-pocket.export",
+          "when": "view == prompt-pocket-view"
+        },
+        {
+          "command": "prompt-pocket.import",
+          "when": "view == prompt-pocket-view"
+        },
+        {
+          "command": "prompt-pocket.search",
+          "when": "view == prompt-pocket-view"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "prompt-pocket.createSubgroup",
+          "when": "view == prompt-pocket-view && viewItem == prompt-group",
+          "group": "inline"
+        },
+        {
+          "command": "prompt-pocket.createPrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-group",
+          "group": "inline"
+        },
+        {
+          "command": "prompt-pocket.renameGroup",
+          "when": "view == prompt-pocket-view && viewItem == prompt-group",
+          "group": "1_modify"
+        },
+        {
+          "command": "prompt-pocket.duplicateGroup",
+          "when": "view == prompt-pocket-view && viewItem == prompt-group",
+          "group": "1_modify"
+        },
+        {
+          "command": "prompt-pocket.deleteGroup",
+          "when": "view == prompt-pocket-view && viewItem == prompt-group",
+          "group": "2_actions"
+        },
+        {
+          "command": "prompt-pocket.copyPrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-item",
+          "group": "inline"
+        },
+        {
+          "command": "prompt-pocket.renamePrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-item",
+          "group": "1_modify"
+        },
+        {
+          "command": "prompt-pocket.editPrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-item",
+          "group": "1_modify"
+        },
+        {
+          "command": "prompt-pocket.duplicatePrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-item",
+          "group": "1_modify"
+        },
+        {
+          "command": "prompt-pocket.deletePrompt",
+          "when": "view == prompt-pocket-view && viewItem == prompt-item",
+          "group": "2_actions"
+        }
+      ]
+    }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "pnpm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "pnpm run compile && pnpm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "./publish.sh",
+    "clean": "rm -rf out node_modules"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
-    "@types/node": "20.x",
-    "@types/mocha": "^10.0.6",
     "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
     "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.56.0",
     "glob": "^10.3.10",
-    "mocha": "^10.2.0"
+    "mocha": "^10.2.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@hugeicons/core-free-icons": "^3.1.1",
+    "@hugeicons/react": "^1.1.4"
   }
 }

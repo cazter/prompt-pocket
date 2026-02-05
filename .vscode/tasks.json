@@ -1,11 +1,11 @@
 {
-	// See https://go.microsoft.com/fwlink/?LinkId=733558
-	// for the documentation about the tasks.json format
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "npm",
-			"script": "watch",
+			"label": "watch",
+			"type": "shell",
+			"command": "pnpm",
+			"args": ["run", "watch"],
 			"problemMatcher": "$tsc-watch",
 			"isBackground": true,
 			"presentation": {
@@ -17,8 +17,10 @@
 			}
 		},
 		{
-			"type": "npm",
-			"script": "compile",
+			"label": "compile",
+			"type": "shell",
+			"command": "pnpm",
+			"args": ["run", "compile"],
 			"problemMatcher": "$tsc",
 			"presentation": {
 				"reveal": "never"

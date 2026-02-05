@@ -1,42 +1,82 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# Dependencies
+node_modules/
+.pnp
 .pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
 
-# testing
-/coverage
-
-# production
-/build
-
-# VS Code extension output
-/out
+# Build outputs
+out/
+dist/
+build/
 *.vsix
 
-# misc
-.DS_Store
-*.pem
+# TypeScript
+*.tsbuildinfo
+*.d.ts.map
 
-# debug
+# Testing
+coverage/
+.nyc_output/
+.vscode-test/
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# local env files
-.env*.local
+# Environment variables
 .env
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# IDE and editor files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
-# VS Code test
-.vscode-test/
+# OS files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
 
-# Compiled JavaScript files in source directories
-test/**/*.js
-test/**/*.js.map
-src/**/*.js
-src/**/*.js.map
+# VS Code extension specific
+.vsce-pat
+*.vsix
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.temp/
+
+# Personal/private files
+.interface-design/
+*.pem
+*.key
+*.cert
+
+# Package manager lock files (optional - uncomment if you want to ignore)
+# pnpm-lock.yaml
+# package-lock.json
+# yarn.lock

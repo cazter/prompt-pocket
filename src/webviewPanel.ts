@@ -11,6 +11,9 @@ interface UIState {
 	searchQuery: string;
 	scrollPosition: number;
 	showMarkdownPreview: boolean;
+	collapsedGroupIds: string[];
+	groupsSidebarWidth: number;
+	groupsSidebarSize: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 interface Config {
@@ -36,6 +39,7 @@ type WebviewMessage =
 	| { type: 'reorderPrompt'; groupId: string; promptId: string; newIndex: number }
 	| { type: 'movePrompt'; promptId: string; fromGroupId: string; toGroupId: string; newIndex?: number }
 	| { type: 'reorderGroup'; groupId: string; newIndex: number }
+	| { type: 'moveGroup'; groupId: string; targetGroupId: string | null; newIndex?: number }
 	| { type: 'export' }
 	| { type: 'import' };
 
@@ -117,11 +121,16 @@ export class PromptPocketPanel {
 	}
 
 	private async getUIState(): Promise<UIState> {
-		return this.context.globalState.get<UIState>(UI_STATE_KEY) || {
+		const stored = this.context.globalState.get<UIState>(UI_STATE_KEY);
+		return {
 			selectedGroupId: null,
 			searchQuery: '',
 			scrollPosition: 0,
-			showMarkdownPreview: false
+			showMarkdownPreview: false,
+			collapsedGroupIds: [],
+			groupsSidebarWidth: 220,
+			groupsSidebarSize: 'md',
+			...stored
 		};
 	}
 
@@ -269,6 +278,12 @@ export class PromptPocketPanel {
 				break;
 			}
 
+			case 'moveGroup': {
+				await this.storage.moveGroup(message.groupId, message.targetGroupId, message.newIndex);
+				this.refreshState();
+				break;
+			}
+
 			case 'export': {
 				vscode.commands.executeCommand('prompt-pocket.export');
 				break;
@@ -276,7 +291,7 @@ export class PromptPocketPanel {
 
 			case 'import': {
 				vscode.commands.executeCommand('prompt-pocket.import');
-				setTimeout(() => this.refreshState(), 500);
+				global.setTimeout(() => this.refreshState(), 500);
 				break;
 			}
 		}
@@ -391,11 +406,51 @@ export class PromptPocketPanel {
 
 		/* Groups sidebar */
 		.groups-sidebar {
-			width: 200px;
+			width: 220px;
+			min-width: 180px;
+			max-width: 480px;
 			border-left: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
 			display: flex;
 			flex-direction: column;
 			background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+			overflow: hidden;
+		}
+
+		.groups-sidebar.size-sm .group-item {
+			padding-top: 6px;
+			padding-bottom: 6px;
+			font-size: 0.9em;
+		}
+
+		.groups-sidebar.size-md .group-item {
+			padding-top: 8px;
+			padding-bottom: 8px;
+			font-size: 1em;
+		}
+
+		.groups-sidebar.size-lg .group-item {
+			padding-top: 10px;
+			padding-bottom: 10px;
+			font-size: 1.05em;
+		}
+
+		.groups-sidebar.size-xl .group-item {
+			padding-top: 12px;
+			padding-bottom: 12px;
+			font-size: 1.1em;
+		}
+
+		.sidebar-resizer {
+			width: 4px;
+			cursor: col-resize;
+			background: transparent;
+			transition: background var(--transition);
+			flex-shrink: 0;
+		}
+
+		.sidebar-resizer:hover,
+		.sidebar-resizer.dragging {
+			background: var(--vscode-editorGroup-border, var(--vscode-widget-border));
 		}
 
 		.groups-header {
@@ -404,6 +459,7 @@ export class PromptPocketPanel {
 			justify-content: space-between;
 			padding: var(--spacing-md);
 			border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+			gap: var(--spacing-sm);
 		}
 
 		.groups-header-title {
@@ -414,10 +470,48 @@ export class PromptPocketPanel {
 			opacity: 0.8;
 		}
 
+		.groups-header-controls {
+			display: inline-flex;
+			align-items: center;
+			gap: var(--spacing-xs);
+		}
+
+		.size-toggle {
+			display: inline-flex;
+			align-items: center;
+			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+			border-radius: var(--radius-sm);
+			overflow: hidden;
+		}
+
+		.size-toggle button {
+			background: transparent;
+			color: var(--vscode-foreground);
+			border: none;
+			padding: 2px 6px;
+			font-size: 0.8em;
+			cursor: pointer;
+		}
+
+		.size-toggle button.active {
+			background: var(--vscode-list-activeSelectionBackground);
+			color: var(--vscode-list-activeSelectionForeground);
+		}
+
 		.groups-list {
 			flex: 1;
 			overflow-y: auto;
 			padding: var(--spacing-sm);
+		}
+
+		.tree-guide {
+			position: absolute;
+			left: 0;
+			top: 0;
+			bottom: 0;
+			width: 1px;
+			background: var(--vscode-tree-indentGuidesStroke);
+			opacity: 0.4;
 		}
 
 		.group-item {
@@ -429,6 +523,7 @@ export class PromptPocketPanel {
 			cursor: pointer;
 			transition: background var(--transition);
 			margin-bottom: 2px;
+			position: relative;
 		}
 
 		.group-item:hover {
@@ -787,6 +882,32 @@ export class PromptPocketPanel {
 			padding: 0;
 		}
 
+		.highlight {
+			background-color: var(--vscode-editor-findMatchHighlightBackground);
+			color: inherit;
+			border-radius: 2px;
+		}
+
+		.group-item.drag-over {
+			background: var(--vscode-list-hoverBackground);
+			outline: 2px solid var(--vscode-focusBorder);
+			outline-offset: -2px;
+		}
+
+		.group-item.drag-over-top {
+			border-top: 2px solid var(--vscode-focusBorder);
+		}
+
+		.group-item.drag-over-bottom {
+			border-bottom: 2px solid var(--vscode-focusBorder);
+		}
+
+		.group-item.drag-over-center {
+			background: var(--vscode-list-hoverBackground);
+			outline: 2px solid var(--vscode-focusBorder);
+			outline-offset: -2px;
+		}
+
 		.prompt-group-badge {
 			font-size: 0.75em;
 			padding: 2px 8px;
@@ -866,8 +987,8 @@ export class PromptPocketPanel {
 			background: var(--vscode-editor-background);
 			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
 			border-radius: var(--radius-md);
-			width: 90%;
-			max-width: 700px;
+			width: 600px;
+			max-width: 95vw;
 			min-width: 400px;
 			min-height: 300px;
 			max-height: 90vh;
@@ -896,6 +1017,8 @@ export class PromptPocketPanel {
 			display: flex;
 			flex-direction: column;
 			gap: var(--spacing-md);
+			flex: 1;
+			min-height: 0;
 		}
 
 		.modal-footer {
@@ -1116,7 +1239,7 @@ export class PromptPocketPanel {
 						</button>
 						<button class="btn btn-primary" id="addPromptBtn">
 							<span class="icon">${Icons.add}</span>
-							Add Prompt
+							Add
 						</button>
 					</div>
 				</div>
@@ -1137,12 +1260,21 @@ export class PromptPocketPanel {
 			</div>
 		</div>
 
-		<div class="groups-sidebar">
+		<div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize"></div>
+		<div class="groups-sidebar" id="groupsSidebar">
 			<div class="groups-header">
 				<span class="groups-header-title">Groups</span>
-				<button class="btn btn-ghost btn-icon-sm" id="addGroupBtn" title="New Group">
-					<span class="icon">${Icons.addGroup}</span>
-				</button>
+				<div class="groups-header-controls">
+					<div class="size-toggle" id="sizeToggle" title="Group size">
+						<button type="button" data-size="sm">S</button>
+						<button type="button" data-size="md">M</button>
+						<button type="button" data-size="lg">L</button>
+							<button type="button" data-size="xl">XL</button>
+					</div>
+					<button class="btn btn-ghost btn-icon-sm" id="addGroupBtn" title="New Group">
+						<span class="icon">${Icons.addGroup}</span>
+					</button>
+				</div>
 			</div>
 			<div class="groups-list" id="groupsList"></div>
 		</div>
@@ -1163,6 +1295,10 @@ export class PromptPocketPanel {
 				</div>
 			</div>
 			<div class="modal-body">
+				<div class="form-group">
+					<label class="form-label" for="promptGroup">Group</label>
+					<select class="form-input" id="promptGroup"></select>
+				</div>
 				<div class="form-group">
 					<label class="form-label" for="promptTitle">Title</label>
 					<input type="text" class="form-input" id="promptTitle" placeholder="Enter prompt title">
@@ -1250,14 +1386,23 @@ export class PromptPocketPanel {
 		// State
 		let state = {
 			data: { groups: [] },
-			uiState: { selectedGroupId: null, searchQuery: '', scrollPosition: 0, showMarkdownPreview: false },
+			uiState: {
+				selectedGroupId: null,
+				searchQuery: '',
+				scrollPosition: 0,
+				showMarkdownPreview: false,
+				collapsedGroupIds: [],
+				groupsSidebarWidth: 220,
+				groupsSidebarSize: 'md'
+			},
 			config: { showCopyNotification: true, confirmDelete: true },
 			selectedPromptIndex: -1,
 			editingPrompt: null,
 			editingPromptGroupId: null,
 			editingGroup: null,
 			draggedPrompt: null,
-			draggedPromptGroupId: null
+			draggedPromptGroupId: null,
+			draggedGroup: null
 		};
 
 		// Color map
@@ -1284,6 +1429,7 @@ export class PromptPocketPanel {
 			promptModalTitle: document.getElementById('promptModalTitle'),
 			promptModalClose: document.getElementById('promptModalClose'),
 			promptModalPreview: document.getElementById('promptModalPreview'),
+			promptGroup: document.getElementById('promptGroup'),
 			promptTitle: document.getElementById('promptTitle'),
 			promptContent: document.getElementById('promptContent'),
 			promptPreview: document.getElementById('promptPreview'),
@@ -1302,14 +1448,49 @@ export class PromptPocketPanel {
 			promptTooltip: document.getElementById('promptTooltip'),
 			toast: document.getElementById('toast'),
 			importBtn: document.getElementById('importBtn'),
-			exportBtn: document.getElementById('exportBtn')
+			exportBtn: document.getElementById('exportBtn'),
+			groupsSidebar: document.getElementById('groupsSidebar'),
+			sidebarResizer: document.getElementById('sidebarResizer'),
+			sizeToggle: document.getElementById('sizeToggle')
 		};
+
+		const sidebarMinWidth = 180;
+		const sidebarMaxWidth = 480;
+
+		function applySidebarWidth(width) {
+			if (!elements.groupsSidebar) return sidebarMinWidth;
+			const clamped = Math.min(sidebarMaxWidth, Math.max(sidebarMinWidth, width));
+			elements.groupsSidebar.style.width = clamped + 'px';
+			return clamped;
+		}
+
+		function applyGroupSize(size) {
+			if (!elements.groupsSidebar) return;
+			elements.groupsSidebar.classList.remove('size-sm', 'size-md', 'size-lg', 'size-xl');
+			elements.groupsSidebar.classList.add('size-' + size);
+		}
+
+		function updateSizeToggle() {
+			const activeSize = state.uiState.groupsSidebarSize || 'md';
+			if (!elements.sizeToggle) return;
+			elements.sizeToggle.querySelectorAll('button').forEach(btn => {
+				btn.classList.toggle('active', btn.dataset.size === activeSize);
+			});
+		}
 
 		// Utility functions
 		function escapeHtml(text) {
 			const div = document.createElement('div');
 			div.textContent = text;
 			return div.innerHTML;
+		}
+
+		function highlightText(text, query) {
+			if (!query) return escapeHtml(text);
+			const escapedText = escapeHtml(text);
+			const escapedQuery = escapeHtml(query).replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&');
+			const regex = new RegExp(\`(\${escapedQuery})\`, 'gi');
+			return escapedText.replace(regex, '<span class="highlight">$1</span>');
 		}
 
 		function simpleMarkdown(text) {
@@ -1349,7 +1530,10 @@ export class PromptPocketPanel {
 		function flattenGroups(groups, depth = 0, result = []) {
 			for (const group of groups) {
 				result.push({ ...group, depth });
-				flattenGroups(group.children, depth + 1, result);
+				const collapsed = state.uiState.collapsedGroupIds || [];
+				if (!collapsed.includes(group.id)) {
+					flattenGroups(group.children, depth + 1, result);
+				}
 			}
 			return result;
 		}
@@ -1442,6 +1626,9 @@ export class PromptPocketPanel {
 
 		// Render functions
 		function render() {
+			applySidebarWidth(state.uiState.groupsSidebarWidth || 220);
+			applyGroupSize(state.uiState.groupsSidebarSize || 'md');
+			updateSizeToggle();
 			renderGroupsSidebar();
 			renderPromptList();
 		}
@@ -1452,7 +1639,7 @@ export class PromptPocketPanel {
 
 			let html = \`
 				<div class="group-item all-prompts \${!state.uiState.selectedGroupId ? 'selected' : ''}" data-group-id="">
-					<span class="group-name">All Prompts</span>
+					<span class="group-name">All</span>
 					<span class="group-count">\${totalPrompts}</span>
 				</div>
 			\`;
@@ -1461,12 +1648,39 @@ export class PromptPocketPanel {
 				const isSelected = group.id === state.uiState.selectedGroupId;
 				const colorStyle = group.color ? \`background: \${colorMap[group.color]}\` : '';
 				const indent = group.depth * 12;
+				const hasChildren = group.children.length > 0;
+				const isCollapsed = (state.uiState.collapsedGroupIds || []).includes(group.id);
+				const chevronIcon = isCollapsed ? '${Icons.chevronRight}' : '${Icons.chevronDown}';
+				
+				const chevronStyle = \`
+					width: 16px;
+					height: 16px;
+					margin-right: 4px;
+					cursor: pointer;
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					opacity: 0.7;
+					visibility: \${hasChildren ? 'visible' : 'hidden'};
+				\`;
+
+				// Tree guides
+				let guides = '';
+				if (group.depth > 0) {
+					// Add visual indicator for hierarchy
+					guides = \`<span style="position: absolute; left: \${indent}px; top: 0; bottom: 0; width: 1px; border-left: 1px solid var(--vscode-tree-indentGuidesStroke); opacity: 0.4;"></span>\`;
+					// Add L shape
+					guides += \`<span style="position: absolute; left: \${indent}px; top: 50%; width: 8px; border-top: 1px solid var(--vscode-tree-indentGuidesStroke); opacity: 0.4;"></span>\`;
+				}
 
 				html += \`
-					<div class="group-item \${isSelected ? 'selected' : ''}" data-group-id="\${group.id}" style="padding-left: \${16 + indent}px">
+					<div class="group-item \${isSelected ? 'selected' : ''}" data-group-id="\${group.id}" style="padding-left: \${16 + indent}px" draggable="true">
+						\${guides}
+						<div class="group-toggle" style="\${chevronStyle}">
+							<span class="icon">\${chevronIcon}</span>
+						</div>
 						<div class="group-color-dot" style="\${colorStyle}"></div>
 						<span class="group-name">\${escapeHtml(group.name)}</span>
-						<span class="group-count">\${group.prompts.length}</span>
 						<div class="group-actions">
 							<button class="btn btn-ghost btn-icon-sm edit-group-btn" title="Edit">
 								<span class="icon">${Icons.edit}</span>
@@ -1499,7 +1713,9 @@ export class PromptPocketPanel {
 				const preview = lines.join('\\n');
 				const isSelected = i === state.selectedPromptIndex;
 				const colorStyle = color ? \`border-left-color: \${colorMap[color]}\` : '';
-				const previewHtml = escapeHtml(preview);
+				// Apply highlighting
+				const titleHtml = highlightText(prompt.title, state.uiState.searchQuery);
+				const previewHtml = highlightText(preview, state.uiState.searchQuery);
 
 				html += \`
 					<div class="prompt-item \${isSelected ? 'selected' : ''}"
@@ -1514,7 +1730,7 @@ export class PromptPocketPanel {
 						</div>
 						<div class="prompt-item-content">
 							<div class="prompt-title">
-								<span class="prompt-title-text">\${escapeHtml(prompt.title)}</span>
+								<span class="prompt-title-text">\${titleHtml}</span>
 								\${!state.uiState.selectedGroupId ? \`<span class="prompt-group-badge" style="\${color ? 'background:' + colorMap[color] : ''}">\${escapeHtml(path[path.length - 1])}</span>\` : ''}
 							</div>
 							<div class="prompt-preview">\${previewHtml}</div>
@@ -1567,6 +1783,26 @@ export class PromptPocketPanel {
 			}
 		}
 
+		function populateGroupSelect(selectedGroupId) {
+			elements.promptGroup.innerHTML = '';
+			const flatGroups = flattenGroups(state.data.groups);
+			
+			// Add "My Prompts" (root) if no groups exist, or just let user create one?
+			// Actually, if groups exist, we should list them.
+			
+			for (const group of flatGroups) {
+				const option = document.createElement('option');
+				option.value = group.id;
+				// Indent name based on depth
+				const prefix = '\u00A0\u00A0'.repeat(group.depth);
+				option.textContent = prefix + group.name;
+				if (group.id === selectedGroupId) {
+					option.selected = true;
+				}
+				elements.promptGroup.appendChild(option);
+			}
+		}
+
 		function openPromptModal(prompt = null, groupId = null) {
 			state.editingPrompt = prompt;
 			state.editingPromptGroupId = groupId;
@@ -1575,6 +1811,18 @@ export class PromptPocketPanel {
 			elements.promptContent.value = prompt ? prompt.content : '';
 			elements.promptModalDelete.style.display = prompt ? '' : 'none';
 
+			// Populate group select
+			// If creating new, use selectedGroupId from state if available, otherwise first group
+			let targetGroupId = groupId;
+			if (!targetGroupId) {
+				targetGroupId = state.uiState.selectedGroupId;
+			// If "All" is selected (null), default to first group
+				if (!targetGroupId && state.data.groups.length > 0) {
+					targetGroupId = state.data.groups[0].id;
+				}
+			}
+			populateGroupSelect(targetGroupId);
+
 			// Reset preview mode
 			promptModalPreviewMode = false;
 			updatePromptPreview();
@@ -1582,7 +1830,8 @@ export class PromptPocketPanel {
 			// Store initial state for change detection
 			promptModalInitialState = {
 				title: elements.promptTitle.value,
-				content: elements.promptContent.value
+				content: elements.promptContent.value,
+				groupId: elements.promptGroup.value
 			};
 
 			elements.promptModal.classList.add('visible');
@@ -1591,7 +1840,8 @@ export class PromptPocketPanel {
 
 		function hasPromptModalChanges() {
 			return elements.promptTitle.value !== promptModalInitialState.title ||
-				   elements.promptContent.value !== promptModalInitialState.content;
+				   elements.promptContent.value !== promptModalInitialState.content ||
+				   elements.promptGroup.value !== promptModalInitialState.groupId;
 		}
 
 		function closePromptModal(force = false) {
@@ -1716,32 +1966,41 @@ export class PromptPocketPanel {
 		elements.promptModalSave.addEventListener('click', () => {
 			const title = elements.promptTitle.value.trim();
 			const content = elements.promptContent.value;
+			const selectedGroupId = elements.promptGroup.value;
 
 			if (!title) {
 				elements.promptTitle.focus();
 				return;
 			}
 
+			if (!selectedGroupId) {
+				// Should not happen if groups exist, but handle it
+				vscode.postMessage({ type: 'createGroup', name: 'My Prompts' });
+				state.pendingPrompt = { title, content };
+				closePromptModal(true);
+				return;
+			}
+
 			if (state.editingPrompt) {
+				// Check if group changed
+				if (selectedGroupId !== state.editingPromptGroupId) {
+					vscode.postMessage({
+						type: 'movePrompt',
+						promptId: state.editingPrompt.id,
+						fromGroupId: state.editingPromptGroupId,
+						toGroupId: selectedGroupId
+					});
+				}
+
 				vscode.postMessage({
 					type: 'updatePrompt',
-					groupId: state.editingPromptGroupId,
+					groupId: selectedGroupId, // Use new group ID
 					promptId: state.editingPrompt.id,
 					title,
 					content
 				});
 			} else {
-				let groupId = state.uiState.selectedGroupId;
-				if (!groupId && state.data.groups.length > 0) {
-					groupId = state.data.groups[0].id;
-				}
-				if (!groupId) {
-					vscode.postMessage({ type: 'createGroup', name: 'My Prompts' });
-					state.pendingPrompt = { title, content };
-					closePromptModal(true);
-					return;
-				}
-				vscode.postMessage({ type: 'createPrompt', groupId, title, content });
+				vscode.postMessage({ type: 'createPrompt', groupId: selectedGroupId, title, content });
 			}
 			closePromptModal(true);
 		});
@@ -1808,17 +2067,55 @@ export class PromptPocketPanel {
 		});
 
 		// Close modals on overlay click
-		elements.promptModal.addEventListener('click', (e) => {
-			if (e.target === elements.promptModal) closePromptModal();
+		elements.promptModal.addEventListener('mousedown', (e) => {
+			if (e.target === elements.promptModal) {
+				// Check if it's a click (mouseup follows mousedown on same element)
+				const mouseUpHandler = (upEvent) => {
+					if (upEvent.target === elements.promptModal) {
+						closePromptModal();
+					}
+					elements.promptModal.removeEventListener('mouseup', mouseUpHandler);
+				};
+				elements.promptModal.addEventListener('mouseup', mouseUpHandler);
+			}
 		});
-		elements.groupModal.addEventListener('click', (e) => {
-			if (e.target === elements.groupModal) closeGroupModal();
+		
+		elements.groupModal.addEventListener('mousedown', (e) => {
+			if (e.target === elements.groupModal) {
+				const mouseUpHandler = (upEvent) => {
+					if (upEvent.target === elements.groupModal) {
+						closeGroupModal();
+					}
+					elements.groupModal.removeEventListener('mouseup', mouseUpHandler);
+				};
+				elements.groupModal.addEventListener('mouseup', mouseUpHandler);
+			}
 		});
 
 		// Groups sidebar events
 		elements.groupsList.addEventListener('click', (e) => {
-			const editBtn = e.target.closest('.edit-group-btn');
+			const toggleBtn = e.target.closest('.group-toggle');
 			const groupItem = e.target.closest('.group-item');
+
+			if (toggleBtn && groupItem) {
+				e.stopPropagation();
+				const groupId = groupItem.dataset.groupId;
+				const collapsed = state.uiState.collapsedGroupIds || [];
+				const index = collapsed.indexOf(groupId);
+				
+				if (index === -1) {
+					collapsed.push(groupId);
+				} else {
+					collapsed.splice(index, 1);
+				}
+				
+				state.uiState.collapsedGroupIds = collapsed;
+				vscode.postMessage({ type: 'updateUIState', state: { collapsedGroupIds: collapsed } });
+				render();
+				return;
+			}
+
+			const editBtn = e.target.closest('.edit-group-btn');
 
 			if (editBtn && groupItem) {
 				e.stopPropagation();
@@ -1837,6 +2134,165 @@ export class PromptPocketPanel {
 				vscode.postMessage({ type: 'selectGroup', groupId });
 				render();
 			}
+		});
+
+		// Sidebar resize
+		let isResizingSidebar = false;
+
+		if (elements.sidebarResizer) {
+			elements.sidebarResizer.addEventListener('mousedown', (e) => {
+				isResizingSidebar = true;
+				elements.sidebarResizer.classList.add('dragging');
+				document.body.style.cursor = 'col-resize';
+				e.preventDefault();
+			});
+		}
+
+		window.addEventListener('mousemove', (e) => {
+			if (!isResizingSidebar) return;
+			const width = window.innerWidth - e.clientX;
+			const clamped = applySidebarWidth(width);
+			state.uiState.groupsSidebarWidth = clamped;
+			vscode.postMessage({ type: 'updateUIState', state: { groupsSidebarWidth: clamped } });
+		});
+
+		window.addEventListener('mouseup', () => {
+			if (!isResizingSidebar) return;
+			isResizingSidebar = false;
+			if (elements.sidebarResizer) {
+				elements.sidebarResizer.classList.remove('dragging');
+			}
+			document.body.style.cursor = '';
+		});
+
+		// Sidebar size options
+		if (elements.sizeToggle) {
+			elements.sizeToggle.addEventListener('click', (e) => {
+				const button = e.target.closest('button');
+				if (!button) return;
+				const size = button.dataset.size;
+				if (!size) return;
+				state.uiState.groupsSidebarSize = size;
+				applyGroupSize(size);
+				vscode.postMessage({ type: 'updateUIState', state: { groupsSidebarSize: size } });
+				updateSizeToggle();
+			});
+		}
+
+		// Groups sidebar drag & drop
+		elements.groupsList.addEventListener('dragstart', (e) => {
+			const groupItem = e.target.closest('.group-item');
+			if (groupItem && !groupItem.classList.contains('all-prompts')) {
+				state.draggedGroup = groupItem.dataset.groupId;
+				e.dataTransfer.effectAllowed = 'move';
+				e.stopPropagation();
+			}
+		});
+
+		elements.groupsList.addEventListener('dragover', (e) => {
+			e.preventDefault();
+			const groupItem = e.target.closest('.group-item');
+			if (!groupItem || groupItem.classList.contains('all-prompts')) return;
+
+			// Clear previous
+			document.querySelectorAll('.group-item.drag-over-top, .group-item.drag-over-bottom, .group-item.drag-over-center').forEach(el => {
+				el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-center');
+			});
+
+			if (state.draggedPrompt) {
+				// Dragging prompt -> only center (nest)
+				groupItem.classList.add('drag-over-center');
+			} else if (state.draggedGroup) {
+				// Dragging group -> check position
+				if (state.draggedGroup === groupItem.dataset.groupId) return; // Can't drop on self
+				if (isDescendantOf(groupItem.dataset.groupId, state.draggedGroup)) return; // Can't drop on descendant
+
+				const rect = groupItem.getBoundingClientRect();
+				const y = e.clientY - rect.top;
+				const height = rect.height;
+				
+				if (y < height * 0.25) {
+					groupItem.classList.add('drag-over-top');
+				} else if (y > height * 0.75) {
+					groupItem.classList.add('drag-over-bottom');
+				} else {
+					groupItem.classList.add('drag-over-center');
+				}
+			}
+		});
+
+		elements.groupsList.addEventListener('dragleave', (e) => {
+			const groupItem = e.target.closest('.group-item');
+			if (groupItem) {
+				groupItem.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-center');
+			}
+		});
+
+		elements.groupsList.addEventListener('drop', (e) => {
+			e.preventDefault();
+			document.querySelectorAll('.group-item.drag-over-top, .group-item.drag-over-bottom, .group-item.drag-over-center').forEach(el => {
+				el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-center');
+			});
+
+			const groupItem = e.target.closest('.group-item');
+			if (!groupItem || groupItem.classList.contains('all-prompts')) return;
+
+			const targetGroupId = groupItem.dataset.groupId;
+
+			if (state.draggedPrompt) {
+				if (targetGroupId !== state.draggedPromptGroupId) {
+					vscode.postMessage({
+						type: 'movePrompt',
+						promptId: state.draggedPrompt,
+						fromGroupId: state.draggedPromptGroupId,
+						toGroupId: targetGroupId
+					});
+				}
+			} else if (state.draggedGroup) {
+				if (state.draggedGroup === targetGroupId) return;
+				if (isDescendantOf(targetGroupId, state.draggedGroup)) return;
+
+				const rect = groupItem.getBoundingClientRect();
+				const y = e.clientY - rect.top;
+				const height = rect.height;
+				
+				let moveType = 'center'; // nest
+				if (y < height * 0.25) moveType = 'top';
+				else if (y > height * 0.75) moveType = 'bottom';
+
+				if (moveType === 'center') {
+					vscode.postMessage({
+						type: 'moveGroup',
+						groupId: state.draggedGroup,
+						targetGroupId: targetGroupId
+					});
+				} else {
+					// Find parent of target
+					const findParent = (groups, id, parentId = null) => {
+						for (let i = 0; i < groups.length; i++) {
+							if (groups[i].id === id) return { parentId, index: i, group: groups[i] };
+							const found = findParent(groups[i].children, id, groups[i].id);
+							if (found) return found;
+						}
+						return null;
+					};
+					
+					const targetInfo = findParent(state.data.groups, targetGroupId);
+					if (targetInfo) {
+						let newIndex = targetInfo.index;
+						if (moveType === 'bottom') newIndex++;
+						
+						vscode.postMessage({
+							type: 'moveGroup',
+							groupId: state.draggedGroup,
+							targetGroupId: targetInfo.parentId,
+							newIndex
+						});
+					}
+				}
+			}
+			
+			state.draggedGroup = null;
 		});
 
 		// Prompt list events
@@ -1876,7 +2332,10 @@ export class PromptPocketPanel {
 			// Click on content area - select
 			const index = parseInt(promptItem.dataset.index);
 			state.selectedPromptIndex = index;
-			render();
+			
+			// Update selection visually without full re-render to preserve DOM for dblclick
+			document.querySelectorAll('.prompt-item.selected').forEach(el => el.classList.remove('selected'));
+			promptItem.classList.add('selected');
 		});
 
 		elements.promptList.addEventListener('dblclick', (e) => {
@@ -2113,7 +2572,7 @@ export class PromptPocketPanel {
 					state.uiState = { ...state.uiState, ...message.uiState };
 					state.config = message.config || state.config;
 
-					// Validate selectedGroupId - reset to All Prompts if group doesn't exist
+					// Validate selectedGroupId - reset to All if group doesn't exist
 					if (state.uiState.selectedGroupId) {
 						const groupExists = findGroup(state.uiState.selectedGroupId);
 						if (!groupExists) {

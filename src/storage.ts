@@ -7,17 +7,32 @@ const INITIALIZED_KEY = 'prompt-pocket-initialized';
 const SAMPLE_DATA: PromptData = {
 	groups: [
 		{
-			id: 'sample-feature-alpha',
-			name: 'Feature Alpha',
+			id: 'sample-prompts',
+			name: 'Prompts',
 			color: 'blue',
-			children: [],
-			prompts: [
+			children: [
 				{
-					id: 'sample-feature-alpha-1',
-					title: 'Implement Feature',
-					content: 'Help me implement [feature description].\n\nContext:\n- [Current state]\n- [Requirements]\n- [Constraints]'
+					id: 'sample-feature-alpha',
+					name: 'Feature Alpha',
+					color: 'blue',
+					children: [],
+					prompts: [
+						{
+							id: 'sample-feature-alpha-1',
+							title: 'Implement Feature',
+							content: 'Help me implement [feature description].\n\nContext:\n- [Current state]\n- [Requirements]\n- [Constraints]'
+						}
+					]
+				},
+				{
+					id: 'sample-feature-bravo',
+					name: 'Feature Bravo',
+					color: 'blue',
+					children: [],
+					prompts: []
 				}
-			]
+			],
+			prompts: []
 		},
 		{
 			id: 'sample-agents',
@@ -291,6 +306,60 @@ export class StorageService {
 			await this.save(data);
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to reorder group: ${error instanceof Error ? error.message : String(error)}`);
+			throw error;
+		}
+	}
+
+	async moveGroup(groupId: string, targetGroupId: string | null, newIndex?: number): Promise<void> {
+		try {
+			const data = await this.load();
+			
+			// Find and remove the group from its current location
+			
+			// Helper to find and remove group
+			const findAndRemove = (groups: PromptGroup[]): PromptGroup | undefined => {
+				const index = groups.findIndex(g => g.id === groupId);
+				if (index !== -1) {
+					return groups.splice(index, 1)[0];
+				}
+				for (const group of groups) {
+					const found = findAndRemove(group.children);
+					if (found) {
+						return found;
+					}
+				}
+				return undefined;
+			};
+
+			const groupToMove = findAndRemove(data.groups);
+
+			if (!groupToMove) {
+				throw new Error('Group not found');
+			}
+
+			// Add to new location
+			let targetChildren: PromptGroup[];
+			if (targetGroupId === null) {
+				// Moving to root
+				targetChildren = data.groups;
+			} else {
+				// Moving to a parent group
+				const targetGroup = this.findGroup(data.groups, targetGroupId);
+				if (!targetGroup) {
+					throw new Error('Target group not found');
+				}
+				targetChildren = targetGroup.children;
+			}
+
+			if (newIndex !== undefined && newIndex >= 0 && newIndex <= targetChildren.length) {
+				targetChildren.splice(newIndex, 0, groupToMove);
+			} else {
+				targetChildren.push(groupToMove);
+			}
+
+			await this.save(data);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to move group: ${error instanceof Error ? error.message : String(error)}`);
 			throw error;
 		}
 	}

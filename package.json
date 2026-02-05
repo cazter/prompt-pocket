@@ -164,6 +164,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show confirmation dialog before deleting prompts or groups"
+        },
+        "promptPocket.modalClickOutsideToClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow closing the prompt modal by clicking outside of it (when no unsaved changes)"
         }
       }
     },

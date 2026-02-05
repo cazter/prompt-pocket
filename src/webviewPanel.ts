@@ -19,6 +19,7 @@ interface UIState {
 interface Config {
 	showCopyNotification: boolean;
 	confirmDelete: boolean;
+	modalClickOutsideToClose: boolean;
 }
 
 /**
@@ -40,6 +41,8 @@ type WebviewMessage =
 	| { type: 'movePrompt'; promptId: string; fromGroupId: string; toGroupId: string; newIndex?: number }
 	| { type: 'reorderGroup'; groupId: string; newIndex: number }
 	| { type: 'moveGroup'; groupId: string; targetGroupId: string | null; newIndex?: number }
+	| { type: 'fileSearch'; query: string }
+	| { type: 'resolveUris'; uris: string[] }
 	| { type: 'export' }
 	| { type: 'import' };
 
@@ -52,7 +55,9 @@ type ExtensionMessage =
 	| { type: 'promptDeleted'; promptId: string; groupId: string }
 	| { type: 'groupCreated'; group: PromptGroup }
 	| { type: 'groupUpdated'; group: PromptGroup }
-	| { type: 'groupDeleted'; groupId: string };
+	| { type: 'groupDeleted'; groupId: string }
+	| { type: 'fileSearchResults'; query: string; results: string[] }
+	| { type: 'resolvedPaths'; paths: string[] };
 
 export class PromptPocketPanel {
 	public static currentPanel: PromptPocketPanel | undefined;
@@ -62,6 +67,7 @@ export class PromptPocketPanel {
 	private readonly storage: StorageService;
 	private readonly context: vscode.ExtensionContext;
 	private disposables: vscode.Disposable[] = [];
+	private fileCache: { files: string[]; timestamp: number } = { files: [], timestamp: 0 };
 
 	private constructor(
 		panel: vscode.WebviewPanel,
@@ -139,11 +145,54 @@ export class PromptPocketPanel {
 		await this.context.globalState.update(UI_STATE_KEY, { ...current, ...state });
 	}
 
+	private async getWorkspaceFiles(): Promise<string[]> {
+		const cacheTtlMs = 60000; // 60 second cache
+		const now = Date.now();
+		if (this.fileCache.files.length > 0 && now - this.fileCache.timestamp < cacheTtlMs) {
+			return this.fileCache.files;
+		}
+
+		const exclude = [
+			// Package managers & dependencies
+			'**/node_modules/**', '**/.pnpm/**', '**/.pnpm-store/**', '**/.yarn/**',
+			'**/.npm/**', '**/bower_components/**', '**/jspm_packages/**', '**/vendor/**',
+			'**/Pods/**', '**/.bundle/**',
+			// Version control
+			'**/.git/**', '**/.svn/**', '**/.hg/**',
+			// Build outputs
+			'**/dist/**', '**/out/**', '**/build/**', '**/target/**', '**/_build/**',
+			'**/.next/**', '**/.nuxt/**', '**/.svelte-kit/**', '**/.angular/**',
+			'**/.turbo/**', '**/.parcel-cache/**', '**/.cache/**', '**/.sass-cache/**',
+			'**/.gradle/**', '**/.maven/**',
+			// Python
+			'**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/.env/**',
+			'**/.pytest_cache/**', '**/.mypy_cache/**', '**/.tox/**',
+			'**/*.egg-info/**', '**/.eggs/**',
+			// Test & coverage
+			'**/coverage/**', '**/.nyc_output/**', '**/htmlcov/**',
+			// IDE & editors (keep .vscode for settings, but not .idea)
+			'**/.idea/**',
+			// DevOps & infra
+			'**/.terraform/**', '**/.serverless/**', '**/.vagrant/**',
+			// Minified & generated
+			'**/*.min.js', '**/*.map', '**/*.min.css'
+		].join(',');
+		const excludePattern = `{${exclude}}`;
+		const uris = await vscode.workspace.findFiles('**/*', excludePattern, 2000);
+		const files = uris
+			.map(uri => vscode.workspace.asRelativePath(uri, false))
+			.sort((a, b) => a.localeCompare(b));
+
+		this.fileCache = { files, timestamp: now };
+		return files;
+	}
+
 	private getConfig(): Config {
 		const config = vscode.workspace.getConfiguration('promptPocket');
 		return {
 			showCopyNotification: config.get<boolean>('showCopyNotification', true),
-			confirmDelete: config.get<boolean>('confirmDelete', true)
+			confirmDelete: config.get<boolean>('confirmDelete', true),
+			modalClickOutsideToClose: config.get<boolean>('modalClickOutsideToClose', true)
 		};
 	}
 
@@ -281,6 +330,45 @@ export class PromptPocketPanel {
 			case 'moveGroup': {
 				await this.storage.moveGroup(message.groupId, message.targetGroupId, message.newIndex);
 				this.refreshState();
+				break;
+			}
+
+			case 'fileSearch': {
+				const query = message.query.trim().toLowerCase();
+				const includeHidden = query.startsWith('.');
+				const files = await this.getWorkspaceFiles();
+
+				// Filter out hidden paths unless query starts with '.'
+				const visibleFiles = includeHidden
+					? files
+					: files.filter(file => !file.split('/').some(segment => segment.startsWith('.')));
+
+				const results = query
+					? visibleFiles.filter(file => file.toLowerCase().includes(query))
+					: visibleFiles;
+
+				this.postMessage({
+					type: 'fileSearchResults',
+					query: message.query,
+					results: results.slice(0, 50)
+				});
+				break;
+			}
+
+			case 'resolveUris': {
+				const paths = message.uris.map(uriString => {
+					try {
+						const uri = vscode.Uri.parse(uriString);
+						return vscode.workspace.asRelativePath(uri, false);
+					} catch {
+						return null;
+					}
+				}).filter((p): p is string => p !== null);
+
+				this.postMessage({
+					type: 'resolvedPaths',
+					paths
+				});
 				break;
 			}
 
@@ -1062,6 +1150,135 @@ export class PromptPocketPanel {
 			font-family: var(--vscode-editor-font-family, monospace);
 			line-height: 1.5;
 			flex: 1;
+			transition: border-color 0.15s, box-shadow 0.15s;
+		}
+
+		.form-textarea.drag-over {
+			border-color: var(--vscode-focusBorder);
+			box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+		}
+
+		.textarea-wrapper {
+			position: relative;
+			display: flex;
+			flex-direction: column;
+			flex: 1;
+			min-height: 0;
+		}
+
+		.file-mention-menu {
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: 40px;
+			max-height: 240px;
+			overflow-y: auto;
+			background: var(--vscode-menu-background, var(--vscode-editor-background));
+			border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+			border-radius: var(--radius-md);
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+			z-index: 100;
+			display: none;
+		}
+
+		.file-mention-menu.visible {
+			display: block;
+		}
+
+		.file-mention-item {
+			display: flex;
+			align-items: center;
+			gap: var(--spacing-sm);
+			padding: var(--spacing-sm) var(--spacing-md);
+			cursor: pointer;
+			font-family: var(--vscode-editor-font-family, monospace);
+			font-size: 0.9em;
+			transition: background var(--transition);
+		}
+
+		.file-mention-item:hover,
+		.file-mention-item.active {
+			background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+			color: var(--vscode-menu-selectionForeground, inherit);
+		}
+
+		.file-mention-item .file-icon {
+			opacity: 0.6;
+		}
+
+		.file-mention-item .file-path {
+			opacity: 0.6;
+			font-size: 0.85em;
+			margin-left: auto;
+		}
+
+		.file-mention-empty {
+			padding: var(--spacing-md);
+			text-align: center;
+			opacity: 0.6;
+			font-size: 0.9em;
+		}
+
+		.attached-files {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--spacing-xs);
+			margin-top: var(--spacing-sm);
+		}
+
+		.attached-files:empty {
+			display: none;
+		}
+
+		.file-chip {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 8px 4px 10px;
+			background: var(--vscode-badge-background, rgba(255, 255, 255, 0.1));
+			color: var(--vscode-badge-foreground, inherit);
+			border-radius: 12px;
+			font-size: 0.8em;
+			font-family: var(--vscode-editor-font-family, monospace);
+			max-width: 100%;
+		}
+
+		.file-chip .file-chip-icon {
+			opacity: 0.7;
+			flex-shrink: 0;
+		}
+
+		.file-chip .file-chip-name {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.file-chip .file-chip-remove {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 16px;
+			height: 16px;
+			border: none;
+			background: transparent;
+			color: inherit;
+			opacity: 0.6;
+			cursor: pointer;
+			padding: 0;
+			border-radius: 50%;
+			flex-shrink: 0;
+			transition: opacity 0.15s, background 0.15s;
+		}
+
+		.file-chip .file-chip-remove:hover {
+			opacity: 1;
+			background: rgba(255, 255, 255, 0.1);
+		}
+
+		.file-chip .file-chip-remove svg {
+			width: 10px;
+			height: 10px;
 		}
 
 		.form-preview {
@@ -1304,9 +1521,13 @@ export class PromptPocketPanel {
 					<input type="text" class="form-input" id="promptTitle" placeholder="Enter prompt title">
 				</div>
 				<div class="form-group" style="flex: 1; display: flex; flex-direction: column;">
-					<label class="form-label" for="promptContent">Content</label>
-					<textarea class="form-input form-textarea" id="promptContent" placeholder="Enter prompt content..."></textarea>
-					<div class="form-preview" id="promptPreview" style="display: none;"></div>
+					<label class="form-label" for="promptContent">Content <span style="opacity: 0.5; font-weight: normal; font-size: 0.85em;">Type @ to mention files</span></label>
+					<div class="textarea-wrapper">
+						<textarea class="form-input form-textarea" id="promptContent" placeholder="Enter prompt content..."></textarea>
+						<div class="file-mention-menu" id="fileMentionMenu"></div>
+						<div class="form-preview" id="promptPreview" style="display: none;"></div>
+					</div>
+					<div class="attached-files" id="attachedFiles"></div>
 				</div>
 			</div>
 			<div class="modal-footer">
@@ -1433,6 +1654,8 @@ export class PromptPocketPanel {
 			promptTitle: document.getElementById('promptTitle'),
 			promptContent: document.getElementById('promptContent'),
 			promptPreview: document.getElementById('promptPreview'),
+			fileMentionMenu: document.getElementById('fileMentionMenu'),
+			attachedFiles: document.getElementById('attachedFiles'),
 			promptModalDelete: document.getElementById('promptModalDelete'),
 			promptModalCancel: document.getElementById('promptModalCancel'),
 			promptModalSave: document.getElementById('promptModalSave'),
@@ -1775,12 +1998,147 @@ export class PromptPocketPanel {
 				elements.promptPreview.innerHTML = simpleMarkdown(escapeHtml(content));
 				elements.promptContent.style.display = 'none';
 				elements.promptPreview.style.display = 'block';
+				hideMentionMenu();
 				elements.promptModalPreview.classList.add('active');
 			} else {
 				elements.promptContent.style.display = 'block';
 				elements.promptPreview.style.display = 'none';
 				elements.promptModalPreview.classList.remove('active');
 			}
+		}
+
+		// File mention autocomplete
+		let mentionState = {
+			active: false,
+			query: '',
+			startIndex: -1,
+			selectedIndex: 0,
+			results: []
+		};
+		let mentionSearchTimeout = null;
+
+		function getMentionContext(text, cursorIndex) {
+			const before = text.slice(0, cursorIndex);
+			const atIndex = before.lastIndexOf('@');
+			if (atIndex === -1) return null;
+			// Check that @ is at start or after whitespace
+			const prevChar = atIndex > 0 ? before[atIndex - 1] : '';
+			if (prevChar && !/[\\s\\n\\r]/.test(prevChar)) return null;
+			// Extract query (text after @)
+			const query = before.slice(atIndex + 1);
+			// If query contains whitespace, mention is complete
+			if (/[\\s\\n\\r]/.test(query)) return null;
+			return { query, startIndex: atIndex };
+		}
+
+		function showMentionMenu(results, selectedIndex = 0) {
+			if (!elements.fileMentionMenu) return;
+			mentionState.results = results;
+			mentionState.selectedIndex = Math.max(0, Math.min(selectedIndex, results.length - 1));
+
+			if (!results.length) {
+				elements.fileMentionMenu.innerHTML = '<div class="file-mention-empty">No files found</div>';
+				elements.fileMentionMenu.classList.add('visible');
+				return;
+			}
+
+			elements.fileMentionMenu.innerHTML = results
+				.map((filePath, index) => {
+					const fileName = filePath.split('/').pop();
+					const dirPath = filePath.includes('/') ? filePath.substring(0, filePath.lastIndexOf('/')) : '';
+					const activeClass = index === mentionState.selectedIndex ? 'active' : '';
+					return '<div class="file-mention-item ' + activeClass + '" data-index="' + index + '" data-path="' + escapeHtml(filePath) + '">' +
+						'<span class="file-icon">\u{1F4C4}</span>' +
+						'<span class="file-name">' + escapeHtml(fileName) + '</span>' +
+						(dirPath ? '<span class="file-path">' + escapeHtml(dirPath) + '</span>' : '') +
+						'</div>';
+				})
+				.join('');
+			elements.fileMentionMenu.classList.add('visible');
+		}
+
+		function hideMentionMenu() {
+			if (!elements.fileMentionMenu) return;
+			mentionState.active = false;
+			mentionState.query = '';
+			mentionState.startIndex = -1;
+			mentionState.results = [];
+			mentionState.selectedIndex = 0;
+			elements.fileMentionMenu.classList.remove('visible');
+			elements.fileMentionMenu.innerHTML = '';
+			if (mentionSearchTimeout) {
+				clearTimeout(mentionSearchTimeout);
+				mentionSearchTimeout = null;
+			}
+		}
+
+		function updateAttachedFiles() {
+			if (!elements.attachedFiles || !elements.promptContent) return;
+
+			const content = elements.promptContent.value;
+			// Match @filepath patterns (filepath can contain letters, numbers, /, ., -, _)
+			const mentionRegex = /@([a-zA-Z0-9_\\-\\.\\/]+)/g;
+			const mentions = [];
+			let match;
+			while ((match = mentionRegex.exec(content)) !== null) {
+				mentions.push(match[1]);
+			}
+
+			if (mentions.length === 0) {
+				elements.attachedFiles.innerHTML = '';
+				return;
+			}
+
+			elements.attachedFiles.innerHTML = mentions.map(filePath => {
+				const fileName = filePath.split('/').pop() || filePath;
+				return \`<span class="file-chip" data-path="\${filePath}">
+					<span class="file-chip-icon">${Icons.folder.replace(/"/g, "'")}</span>
+					<span class="file-chip-name" title="\${filePath}">\${fileName}</span>
+					<button class="file-chip-remove" title="Remove">
+						${Icons.close.replace(/"/g, "'")}
+					</button>
+				</span>\`;
+			}).join('');
+		}
+
+		function removeFileMention(filePath) {
+			if (!elements.promptContent) return;
+			const content = elements.promptContent.value;
+			// Remove @filepath (and trailing space if present)
+			// Escape special regex characters in the file path
+			const escaped = filePath.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+			const regex = new RegExp('@' + escaped + '\\\\s?', 'g');
+			elements.promptContent.value = content.replace(regex, '');
+			updateAttachedFiles();
+		}
+
+		function insertMention(filePath) {
+			if (!elements.promptContent) return;
+			const textarea = elements.promptContent;
+			const text = textarea.value;
+			const cursorIndex = textarea.selectionStart;
+			const startIndex = mentionState.startIndex;
+			if (startIndex === -1) return;
+
+			const before = text.slice(0, startIndex);
+			const after = text.slice(cursorIndex);
+			const insertion = '@' + filePath + ' ';
+			const newValue = before + insertion + after;
+			textarea.value = newValue;
+
+			const newCursor = before.length + insertion.length;
+			textarea.setSelectionRange(newCursor, newCursor);
+			textarea.focus();
+			hideMentionMenu();
+		}
+
+		function requestMentionResults(query) {
+			if (mentionSearchTimeout) {
+				clearTimeout(mentionSearchTimeout);
+			}
+			mentionSearchTimeout = setTimeout(() => {
+				vscode.postMessage({ type: 'fileSearch', query });
+			}, 100);
 		}
 
 		function populateGroupSelect(selectedGroupId) {
@@ -1823,9 +2181,11 @@ export class PromptPocketPanel {
 			}
 			populateGroupSelect(targetGroupId);
 
-			// Reset preview mode
+			// Reset preview mode and mention menu
 			promptModalPreviewMode = false;
 			updatePromptPreview();
+			hideMentionMenu();
+			updateAttachedFiles();
 
 			// Store initial state for change detection
 			promptModalInitialState = {
@@ -1852,6 +2212,7 @@ export class PromptPocketPanel {
 			elements.promptModal.classList.remove('visible');
 			state.editingPrompt = null;
 			state.editingPromptGroupId = null;
+			hideMentionMenu();
 		}
 
 		// Group Modal
@@ -1963,6 +2324,118 @@ export class PromptPocketPanel {
 			updatePromptPreview();
 		});
 
+		// File mention autocomplete event listeners
+		if (elements.promptContent) {
+			elements.promptContent.addEventListener('input', (e) => {
+				if (promptModalPreviewMode) return;
+				const text = e.target.value;
+				const cursorIndex = e.target.selectionStart;
+				const context = getMentionContext(text, cursorIndex);
+
+				// Update attached files chips
+				updateAttachedFiles();
+
+				if (!context) {
+					hideMentionMenu();
+					return;
+				}
+
+				mentionState.active = true;
+				mentionState.query = context.query;
+				mentionState.startIndex = context.startIndex;
+				requestMentionResults(context.query);
+			});
+
+			elements.promptContent.addEventListener('keydown', (e) => {
+				if (!mentionState.active || !mentionState.results.length) return;
+
+				if (e.key === 'ArrowDown') {
+					e.preventDefault();
+					mentionState.selectedIndex = Math.min(mentionState.selectedIndex + 1, mentionState.results.length - 1);
+					showMentionMenu(mentionState.results, mentionState.selectedIndex);
+					return;
+				}
+
+				if (e.key === 'ArrowUp') {
+					e.preventDefault();
+					mentionState.selectedIndex = Math.max(mentionState.selectedIndex - 1, 0);
+					showMentionMenu(mentionState.results, mentionState.selectedIndex);
+					return;
+				}
+
+				if (e.key === 'Enter' && mentionState.active && mentionState.results.length) {
+					e.preventDefault();
+					const selected = mentionState.results[mentionState.selectedIndex];
+					if (selected) {
+						insertMention(selected);
+					}
+					return;
+				}
+
+				if (e.key === 'Escape') {
+					hideMentionMenu();
+				}
+			});
+
+			elements.promptContent.addEventListener('blur', () => {
+				// Delay hiding to allow click on menu items
+				setTimeout(() => {
+					if (!elements.fileMentionMenu?.matches(':hover')) {
+						hideMentionMenu();
+					}
+				}, 150);
+			});
+
+			// Drag and drop file references
+			elements.promptContent.addEventListener('dragover', (e) => {
+				e.preventDefault();
+				e.dataTransfer.dropEffect = 'copy';
+				elements.promptContent.classList.add('drag-over');
+			});
+
+			elements.promptContent.addEventListener('dragleave', (e) => {
+				e.preventDefault();
+				elements.promptContent.classList.remove('drag-over');
+			});
+
+			elements.promptContent.addEventListener('drop', (e) => {
+				e.preventDefault();
+				elements.promptContent.classList.remove('drag-over');
+
+				// Get URIs from drag data
+				const uriList = e.dataTransfer.getData('text/uri-list');
+				if (uriList) {
+					const uris = uriList.split('\\n').filter(u => u && !u.startsWith('#'));
+					if (uris.length > 0) {
+						vscode.postMessage({ type: 'resolveUris', uris });
+					}
+				}
+			});
+		}
+
+		if (elements.fileMentionMenu) {
+			elements.fileMentionMenu.addEventListener('mousedown', (e) => {
+				const item = e.target.closest('.file-mention-item');
+				if (!item) return;
+				e.preventDefault();
+				const filePath = item.dataset.path;
+				if (filePath) {
+					insertMention(filePath);
+				}
+			});
+		}
+
+		if (elements.attachedFiles) {
+			elements.attachedFiles.addEventListener('click', (e) => {
+				const removeBtn = e.target.closest('.file-chip-remove');
+				if (!removeBtn) return;
+				const chip = removeBtn.closest('.file-chip');
+				if (chip && chip.dataset.path) {
+					removeFileMention(chip.dataset.path);
+				}
+			});
+		}
+
 		elements.promptModalSave.addEventListener('click', () => {
 			const title = elements.promptTitle.value.trim();
 			const content = elements.promptContent.value;
@@ -2066,9 +2539,9 @@ export class PromptPocketPanel {
 			}
 		});
 
-		// Close modals on overlay click
+		// Close modals on overlay click (if enabled in settings)
 		elements.promptModal.addEventListener('mousedown', (e) => {
-			if (e.target === elements.promptModal) {
+			if (e.target === elements.promptModal && state.config.modalClickOutsideToClose) {
 				// Check if it's a click (mouseup follows mousedown on same element)
 				const mouseUpHandler = (upEvent) => {
 					if (upEvent.target === elements.promptModal) {
@@ -2605,6 +3078,30 @@ export class PromptPocketPanel {
 
 				case 'error':
 					showToast(\`Error: \${message.message}\`, 4000);
+					break;
+
+				case 'fileSearchResults':
+					if (mentionState.active && message.query === mentionState.query) {
+						showMentionMenu(message.results);
+					}
+					break;
+
+				case 'resolvedPaths':
+					if (message.paths.length > 0 && elements.promptContent) {
+						const textarea = elements.promptContent;
+						const cursorPos = textarea.selectionStart;
+						const text = textarea.value;
+						const before = text.slice(0, cursorPos);
+						const after = text.slice(cursorPos);
+
+						// Insert each path as @reference with newlines between multiple
+						const insertion = message.paths.map(p => '@' + p).join(' ') + ' ';
+						textarea.value = before + insertion + after;
+
+						const newCursor = cursorPos + insertion.length;
+						textarea.setSelectionRange(newCursor, newCursor);
+						textarea.focus();
+					}
 					break;
 			}
 		});

@@ -1,14 +1,53 @@
-.vscode/**
-.vscode-test/**
+# Source files (we only need compiled JS)
 src/**
 test/**
-.gitignore
-.eslintrc.json
-**/*.map
 **/*.ts
+**/*.map
+
+# Build and dependency management
+node_modules
+.pnpm-store
+pnpm-lock.yaml
+*.vsix
+
+# Development config
+.vscode
+.vscode-test
+.editorconfig
+.eslintignore
+.eslintrc.json
+.prettierignore
+.prettierrc
 tsconfig.json
-node_modules/**
-.github/**
-*.md
-.env
-.env.*
+.env.example
+
+# Git files
+.git
+.gitignore
+.github
+
+# Scripts
+install.sh
+uninstall-clean.sh
+publish.sh
+
+# Documentation (keep README, LICENSE, CHANGELOG)
+CONTRIBUTING.md
+CLAUDE.md
+INSTALLATION_GUIDE.md
+QUICK_START.md
+
+# Compiled test output
+out/test/**
+
+# Extra media not needed for extension
+media/config_options.png
+media/file_mention_autocomplete.png
+media/ui_preview.png
+media/favicon_io/**
+media/logo/logo_orig.png
+media/logo/small_logo.png
+
+# System files
+**/.DS_Store
+.vscodeignore

@@ -76,6 +76,7 @@ Desktop.ini
 *.pem
 *.key
 *.cert
+prompt-pocket-backup.json
 
 # Package manager lock files (optional - uncomment if you want to ignore)
 # pnpm-lock.yaml

@@ -52,3 +52,6 @@ media/logo/small_logo.png
 # System files
 **/.DS_Store
 .vscodeignore
+
+# Backup files
+prompt-pocket-backup.json

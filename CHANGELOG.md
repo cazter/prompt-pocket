@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-02-26
+
+### Added
+- Added `promptPocket.enableFileReferences` setting to disable `@` file linking in the prompt editor.
+- Added a prompt modal toggle to show/hide referenced item chips (`@files` and domains).
+- Added an inline clear (`X`) button for quickly clearing prompt search.
+
+### Changed
+- Improved export flow to default to a new timestamped JSON filename.
+- Copy operations now normalize prompt text to remove hard line breaks before writing to clipboard.
+
+### Fixed
+- Fixed modal resizing so the resize cursor state does not get stuck after drag-resize.
+
 ## [0.1.0] - 2026-02-04
 
 ### Added
@@ -50,3 +64,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.1.0]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.0
 [0.0.1]: https://github.com/cazter/prompt-pocket/releases/tag/v0.0.1
+[0.1.4]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.4

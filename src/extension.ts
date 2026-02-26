@@ -454,10 +454,43 @@ function generateId(): string {
 }
 
 function normalizeClipboardContent(content: string): string {
-	return content
-		.replace(/\r?\n+/g, ' ')
-		.replace(/[ \t]{2,}/g, ' ')
-		.trim();
+	const normalized = content.replace(/\r\n/g, '\n');
+	const lines = normalized.split('\n');
+	const isStructuralLine = (line: string): boolean => {
+		const trimmed = line.trim();
+		if (!trimmed) {
+			return true;
+		}
+		return /^([-*+]|\d+[.)])\s+/.test(trimmed) || // bullet/numbered list
+			/^#{1,6}\s+/.test(trimmed) || // markdown heading
+			/^```/.test(trimmed) || // fenced code block
+			/^>\s+/.test(trimmed) || // blockquote
+			/^\|.*\|$/.test(trimmed) || // markdown table row
+			/^\s{2,}\S/.test(line); // indented/code-like line
+	};
+
+	if (lines.length <= 1) {
+		return normalized.replace(/[ \t]{2,}/g, ' ').trim();
+	}
+
+	let output = '';
+	for (let i = 0; i < lines.length; i++) {
+		const current = lines[i];
+		const next = i < lines.length - 1 ? lines[i + 1] : undefined;
+		output += current;
+		if (next === undefined) {
+			break;
+		}
+
+		const keepNewline = isStructuralLine(current) || isStructuralLine(next);
+		if (keepNewline) {
+			output += '\n';
+		} else {
+			output += ' ';
+		}
+	}
+
+	return output.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 /**

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-02-26
+
+### Changed
+- Updated clipboard normalization to preserve intentional formatting (lists, spacing, paragraphs) while still unwrapping likely soft-wrapped line breaks.
+
 ## [0.1.4] - 2026-02-26
 
 ### Added
@@ -65,3 +70,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.0
 [0.0.1]: https://github.com/cazter/prompt-pocket/releases/tag/v0.0.1
 [0.1.4]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.4
+[0.1.5]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.5

@@ -18,6 +18,15 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 - **Webview Editor Panel**: Search-first interface that opens as an editor tab (`Cmd+Shift+P` `Cmd+O`)
 - **100% Local**: No telemetry, no accounts, no cloud syncing
 
+## Recent Changes (v0.1.4)
+
+- Fixed modal resize behavior so the resize cursor no longer gets stuck.
+- Added a prompt modal option to hide referenced items (`@files` / domains).
+- Added `promptPocket.enableFileReferences` setting to disable file references and hide related UI.
+- Improved export to default to creating a new timestamped JSON file.
+- Copy now removes hard line breaks for cleaner pasting.
+- Added an `X` button in search to clear filters quickly.
+
 ![File Mention Autocomplete](media/file_mention_autocomplete.png)
 
 ## Installation

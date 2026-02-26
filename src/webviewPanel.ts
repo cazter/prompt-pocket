@@ -11,6 +11,7 @@ interface UIState {
 	searchQuery: string;
 	scrollPosition: number;
 	showMarkdownPreview: boolean;
+	showReferencedItems: boolean;
 	collapsedGroupIds: string[];
 	groupsSidebarWidth: number;
 	groupsSidebarSize: 'sm' | 'md' | 'lg' | 'xl';
@@ -20,6 +21,7 @@ interface Config {
 	showCopyNotification: boolean;
 	confirmDelete: boolean;
 	modalClickOutsideToClose: boolean;
+	enableFileReferences: boolean;
 }
 
 /**
@@ -138,6 +140,7 @@ export class PromptPocketPanel {
 			searchQuery: '',
 			scrollPosition: 0,
 			showMarkdownPreview: false,
+			showReferencedItems: true,
 			collapsedGroupIds: [],
 			groupsSidebarWidth: 220,
 			groupsSidebarSize: 'md',
@@ -148,6 +151,13 @@ export class PromptPocketPanel {
 	private async saveUIState(state: Partial<UIState>): Promise<void> {
 		const current = await this.getUIState();
 		await this.context.globalState.update(UI_STATE_KEY, { ...current, ...state });
+	}
+
+	private normalizeClipboardContent(content: string): string {
+		return content
+			.replace(/\r?\n+/g, ' ')
+			.replace(/[ \t]{2,}/g, ' ')
+			.trim();
 	}
 
 	private async getWorkspaceFiles(): Promise<string[]> {
@@ -197,7 +207,8 @@ export class PromptPocketPanel {
 		return {
 			showCopyNotification: config.get<boolean>('showCopyNotification', true),
 			confirmDelete: config.get<boolean>('confirmDelete', true),
-			modalClickOutsideToClose: config.get<boolean>('modalClickOutsideToClose', true)
+			modalClickOutsideToClose: config.get<boolean>('modalClickOutsideToClose', true),
+			enableFileReferences: config.get<boolean>('enableFileReferences', true)
 		};
 	}
 
@@ -216,7 +227,7 @@ export class PromptPocketPanel {
 				const data = await this.storage.load();
 				const prompt = this.findPrompt(data.groups, message.promptId);
 				if (prompt) {
-					await vscode.env.clipboard.writeText(prompt.content);
+					await vscode.env.clipboard.writeText(this.normalizeClipboardContent(prompt.content));
 					const config = this.getConfig();
 					this.postMessage({ type: 'copied', title: prompt.title, showNotification: config.showCopyNotification });
 				}
@@ -339,6 +350,9 @@ export class PromptPocketPanel {
 			}
 
 			case 'fileSearch': {
+				if (!this.getConfig().enableFileReferences) {
+					break;
+				}
 				const query = message.query.trim().toLowerCase();
 				const includeHidden = query.startsWith('.');
 				const files = await this.getWorkspaceFiles();
@@ -361,6 +375,9 @@ export class PromptPocketPanel {
 			}
 
 			case 'resolveUris': {
+				if (!this.getConfig().enableFileReferences) {
+					break;
+				}
 				const paths = message.uris.map(uriString => {
 					try {
 						const uri = vscode.Uri.parse(uriString);
@@ -693,6 +710,7 @@ export class PromptPocketPanel {
 			width: 100%;
 			padding: var(--spacing-sm) var(--spacing-md);
 			padding-left: 32px;
+			padding-right: 32px;
 			background: var(--vscode-input-background);
 			color: var(--vscode-input-foreground);
 			border: 1px solid var(--vscode-input-border, transparent);
@@ -717,6 +735,33 @@ export class PromptPocketPanel {
 			transform: translateY(-50%);
 			opacity: 0.6;
 			pointer-events: none;
+		}
+
+		.search-clear-btn {
+			position: absolute;
+			right: var(--spacing-xs);
+			top: 50%;
+			transform: translateY(-50%);
+			width: 20px;
+			height: 20px;
+			display: none;
+			align-items: center;
+			justify-content: center;
+			border: none;
+			border-radius: 50%;
+			background: transparent;
+			color: var(--vscode-input-placeholderForeground);
+			cursor: pointer;
+			padding: 0;
+		}
+
+		.search-clear-btn.visible {
+			display: inline-flex;
+		}
+
+		.search-clear-btn:hover {
+			background: var(--vscode-toolbar-hoverBackground);
+			color: var(--vscode-foreground);
 		}
 
 		/* Buttons */
@@ -1089,8 +1134,24 @@ export class PromptPocketPanel {
 			display: flex;
 			flex-direction: column;
 			box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-			resize: both;
-			overflow: auto;
+			overflow: hidden;
+			position: relative;
+		}
+
+		.modal-resizer {
+			position: absolute;
+			right: 0;
+			bottom: 0;
+			width: 16px;
+			height: 16px;
+			cursor: nwse-resize;
+			opacity: 0.45;
+			z-index: 2;
+			user-select: none;
+		}
+
+		.modal-resizer:hover {
+			opacity: 0.75;
 		}
 
 		.modal-header {
@@ -1452,6 +1513,9 @@ export class PromptPocketPanel {
 					<div class="search-container">
 						<span class="icon search-icon">${Icons.search}</span>
 						<input type="text" class="search-input" id="searchInput" placeholder="Search prompts... (Ctrl+F)">
+						<button class="search-clear-btn" id="searchClearBtn" title="Clear search" aria-label="Clear search">
+							<span class="icon">${Icons.close}</span>
+						</button>
 					</div>
 					<div class="actions">
 						<button class="btn btn-ghost btn-icon" id="importBtn" title="Import">
@@ -1505,7 +1569,7 @@ export class PromptPocketPanel {
 
 	<!-- Prompt Modal -->
 	<div class="modal-overlay" id="promptModal">
-		<div class="modal">
+		<div class="modal" id="promptModalContainer">
 			<div class="modal-header">
 				<span class="modal-title" id="promptModalTitle">New Prompt</span>
 				<div style="display: flex; gap: var(--spacing-xs); align-items: center;">
@@ -1527,12 +1591,16 @@ export class PromptPocketPanel {
 					<input type="text" class="form-input" id="promptTitle" placeholder="Enter prompt title">
 				</div>
 				<div class="form-group" style="flex: 1; display: flex; flex-direction: column;">
-					<label class="form-label" for="promptContent">Content <span style="opacity: 0.5; font-weight: normal; font-size: 0.85em;">Type @ to mention files</span></label>
+					<label class="form-label" for="promptContent">Content <span id="mentionHint" style="opacity: 0.5; font-weight: normal; font-size: 0.85em;">Type @ to mention files</span></label>
 					<div class="textarea-wrapper">
 						<textarea class="form-input form-textarea" id="promptContent" placeholder="Enter prompt content..."></textarea>
 						<div class="file-mention-menu" id="fileMentionMenu"></div>
 						<div class="form-preview" id="promptPreview" style="display: none;"></div>
 					</div>
+					<label class="toggle-label" id="showReferencedItemsToggle">
+						<input type="checkbox" id="showReferencedItems" checked>
+						Show referenced items (@files and domains)
+					</label>
 					<div class="attached-files" id="attachedFiles"></div>
 				</div>
 			</div>
@@ -1541,12 +1609,13 @@ export class PromptPocketPanel {
 				<button class="btn btn-secondary" id="promptModalCancel">Cancel</button>
 				<button class="btn btn-primary" id="promptModalSave">Save</button>
 			</div>
+			<div class="modal-resizer" id="promptModalResizer" title="Resize"></div>
 		</div>
 	</div>
 
 	<!-- Group Modal -->
 	<div class="modal-overlay" id="groupModal">
-		<div class="modal">
+		<div class="modal" id="groupModalContainer">
 			<div class="modal-header">
 				<span class="modal-title" id="groupModalTitle">New Group</span>
 				<button class="btn btn-ghost btn-icon" id="groupModalClose">
@@ -1577,6 +1646,7 @@ export class PromptPocketPanel {
 				<button class="btn btn-secondary" id="groupModalCancel">Cancel</button>
 				<button class="btn btn-primary" id="groupModalSave">Save</button>
 			</div>
+			<div class="modal-resizer" id="groupModalResizer" title="Resize"></div>
 		</div>
 	</div>
 
@@ -1618,11 +1688,12 @@ export class PromptPocketPanel {
 				searchQuery: '',
 				scrollPosition: 0,
 				showMarkdownPreview: false,
+				showReferencedItems: true,
 				collapsedGroupIds: [],
 				groupsSidebarWidth: 220,
 				groupsSidebarSize: 'md'
 			},
-			config: { showCopyNotification: true, confirmDelete: true, modalClickOutsideToClose: true },
+			config: { showCopyNotification: true, confirmDelete: true, modalClickOutsideToClose: true, enableFileReferences: true },
 			selectedPromptIndex: -1,
 			editingPrompt: null,
 			editingPromptGroupId: null,
@@ -1646,6 +1717,7 @@ export class PromptPocketPanel {
 		// DOM elements
 		const elements = {
 			searchInput: document.getElementById('searchInput'),
+			searchClearBtn: document.getElementById('searchClearBtn'),
 			addPromptBtn: document.getElementById('addPromptBtn'),
 			promptList: document.getElementById('promptList'),
 			emptyState: document.getElementById('emptyState'),
@@ -1660,7 +1732,10 @@ export class PromptPocketPanel {
 			promptTitle: document.getElementById('promptTitle'),
 			promptContent: document.getElementById('promptContent'),
 			promptPreview: document.getElementById('promptPreview'),
+			mentionHint: document.getElementById('mentionHint'),
 			fileMentionMenu: document.getElementById('fileMentionMenu'),
+			showReferencedItemsToggle: document.getElementById('showReferencedItemsToggle'),
+			showReferencedItems: document.getElementById('showReferencedItems'),
 			attachedFiles: document.getElementById('attachedFiles'),
 			promptModalDelete: document.getElementById('promptModalDelete'),
 			promptModalCancel: document.getElementById('promptModalCancel'),
@@ -1680,7 +1755,11 @@ export class PromptPocketPanel {
 			exportBtn: document.getElementById('exportBtn'),
 			groupsSidebar: document.getElementById('groupsSidebar'),
 			sidebarResizer: document.getElementById('sidebarResizer'),
-			sizeToggle: document.getElementById('sizeToggle')
+			sizeToggle: document.getElementById('sizeToggle'),
+			promptModalContainer: document.getElementById('promptModalContainer'),
+			groupModalContainer: document.getElementById('groupModalContainer'),
+			promptModalResizer: document.getElementById('promptModalResizer'),
+			groupModalResizer: document.getElementById('groupModalResizer')
 		};
 
 		const sidebarMinWidth = 180;
@@ -1705,6 +1784,12 @@ export class PromptPocketPanel {
 			elements.sizeToggle.querySelectorAll('button').forEach(btn => {
 				btn.classList.toggle('active', btn.dataset.size === activeSize);
 			});
+		}
+
+		function updateSearchClearButton() {
+			if (!elements.searchClearBtn) return;
+			const hasQuery = !!(state.uiState.searchQuery && state.uiState.searchQuery.length > 0);
+			elements.searchClearBtn.classList.toggle('visible', hasQuery);
 		}
 
 		// Utility functions
@@ -1858,8 +1943,26 @@ export class PromptPocketPanel {
 			applySidebarWidth(state.uiState.groupsSidebarWidth || 220);
 			applyGroupSize(state.uiState.groupsSidebarSize || 'md');
 			updateSizeToggle();
+			updateSearchClearButton();
+			updateFileReferenceUi();
 			renderGroupsSidebar();
 			renderPromptList();
+		}
+
+		function updateFileReferenceUi() {
+			const referencesEnabled = !!state.config.enableFileReferences;
+			if (elements.mentionHint) {
+				elements.mentionHint.style.display = referencesEnabled ? '' : 'none';
+			}
+			if (elements.showReferencedItemsToggle) {
+				elements.showReferencedItemsToggle.style.display = referencesEnabled ? 'flex' : 'none';
+			}
+			if (!referencesEnabled) {
+				hideMentionMenu();
+				if (elements.attachedFiles) {
+					elements.attachedFiles.innerHTML = '';
+				}
+			}
 		}
 
 		function renderGroupsSidebar() {
@@ -2083,6 +2186,10 @@ export class PromptPocketPanel {
 
 		function updateAttachedFiles() {
 			if (!elements.attachedFiles || !elements.promptContent) return;
+			if (!state.config.enableFileReferences || !state.uiState.showReferencedItems) {
+				elements.attachedFiles.innerHTML = '';
+				return;
+			}
 
 			const content = elements.promptContent.value;
 			// Match @filepath patterns (filepath can contain letters, numbers, /, ., -, _)
@@ -2202,6 +2309,11 @@ export class PromptPocketPanel {
 				groupId: elements.promptGroup.value
 			};
 
+			if (elements.showReferencedItems) {
+				elements.showReferencedItems.checked = !!state.uiState.showReferencedItems;
+			}
+			updateFileReferenceUi();
+
 			elements.promptModal.classList.add('visible');
 			elements.promptTitle.focus();
 		}
@@ -2319,6 +2431,19 @@ export class PromptPocketPanel {
 			render();
 		});
 
+		if (elements.searchClearBtn) {
+			elements.searchClearBtn.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				elements.searchInput.value = '';
+				state.uiState.searchQuery = '';
+				state.selectedPromptIndex = -1;
+				vscode.postMessage({ type: 'updateUIState', state: { searchQuery: '' } });
+				render();
+				elements.searchInput.focus();
+			});
+		}
+
 		elements.addPromptBtn.addEventListener('click', () => openPromptModal());
 		elements.emptyAddBtn.addEventListener('click', () => openPromptModal());
 		elements.addGroupBtn.addEventListener('click', () => openGroupModal());
@@ -2336,6 +2461,7 @@ export class PromptPocketPanel {
 		if (elements.promptContent) {
 			elements.promptContent.addEventListener('input', (e) => {
 				if (promptModalPreviewMode) return;
+				if (!state.config.enableFileReferences) return;
 				const text = e.target.value;
 				const cursorIndex = e.target.selectionStart;
 				const context = getMentionContext(text, cursorIndex);
@@ -2355,6 +2481,7 @@ export class PromptPocketPanel {
 			});
 
 			elements.promptContent.addEventListener('keydown', (e) => {
+				if (!state.config.enableFileReferences) return;
 				if (!mentionState.active || !mentionState.results.length) return;
 
 				if (e.key === 'ArrowDown') {
@@ -2396,17 +2523,20 @@ export class PromptPocketPanel {
 
 			// Drag and drop file references
 			elements.promptContent.addEventListener('dragover', (e) => {
+				if (!state.config.enableFileReferences) return;
 				e.preventDefault();
 				e.dataTransfer.dropEffect = 'copy';
 				elements.promptContent.classList.add('drag-over');
 			});
 
 			elements.promptContent.addEventListener('dragleave', (e) => {
+				if (!state.config.enableFileReferences) return;
 				e.preventDefault();
 				elements.promptContent.classList.remove('drag-over');
 			});
 
 			elements.promptContent.addEventListener('drop', (e) => {
+				if (!state.config.enableFileReferences) return;
 				e.preventDefault();
 				elements.promptContent.classList.remove('drag-over');
 
@@ -2423,6 +2553,7 @@ export class PromptPocketPanel {
 
 		if (elements.fileMentionMenu) {
 			elements.fileMentionMenu.addEventListener('mousedown', (e) => {
+				if (!state.config.enableFileReferences) return;
 				const item = e.target.closest('.file-mention-item');
 				if (!item) return;
 				e.preventDefault();
@@ -2441,6 +2572,15 @@ export class PromptPocketPanel {
 				if (chip && chip.dataset.path) {
 					removeFileMention(chip.dataset.path);
 				}
+			});
+		}
+
+		if (elements.showReferencedItems) {
+			elements.showReferencedItems.addEventListener('change', (e) => {
+				const showReferencedItems = !!e.target.checked;
+				state.uiState.showReferencedItems = showReferencedItems;
+				vscode.postMessage({ type: 'updateUIState', state: { showReferencedItems } });
+				updateAttachedFiles();
 			});
 		}
 
@@ -2658,6 +2798,51 @@ export class PromptPocketPanel {
 			}
 			document.body.style.cursor = '';
 		});
+
+		function setupModalResizer(modalElement, resizerElement) {
+			if (!modalElement || !resizerElement) return;
+			let isResizing = false;
+			let startX = 0;
+			let startY = 0;
+			let startWidth = 0;
+			let startHeight = 0;
+
+			const stopResize = () => {
+				if (!isResizing) return;
+				isResizing = false;
+				document.body.style.cursor = '';
+				document.body.style.userSelect = '';
+			};
+
+			resizerElement.addEventListener('mousedown', (e) => {
+				const rect = modalElement.getBoundingClientRect();
+				isResizing = true;
+				startX = e.clientX;
+				startY = e.clientY;
+				startWidth = rect.width;
+				startHeight = rect.height;
+				document.body.style.cursor = 'nwse-resize';
+				document.body.style.userSelect = 'none';
+				e.preventDefault();
+				e.stopPropagation();
+			});
+
+			window.addEventListener('mousemove', (e) => {
+				if (!isResizing) return;
+				const maxWidth = Math.floor(window.innerWidth * 0.95);
+				const maxHeight = Math.floor(window.innerHeight * 0.9);
+				const width = Math.max(400, Math.min(maxWidth, startWidth + (e.clientX - startX)));
+				const height = Math.max(300, Math.min(maxHeight, startHeight + (e.clientY - startY)));
+				modalElement.style.width = width + 'px';
+				modalElement.style.height = height + 'px';
+			});
+
+			window.addEventListener('mouseup', stopResize);
+			window.addEventListener('blur', stopResize);
+		}
+
+		setupModalResizer(elements.promptModalContainer, elements.promptModalResizer);
+		setupModalResizer(elements.groupModalContainer, elements.groupModalResizer);
 
 		// Sidebar size options
 		if (elements.sizeToggle) {
@@ -3106,13 +3291,13 @@ export class PromptPocketPanel {
 					break;
 
 				case 'fileSearchResults':
-					if (mentionState.active && message.query === mentionState.query) {
+					if (state.config.enableFileReferences && mentionState.active && message.query === mentionState.query) {
 						showMentionMenu(message.results);
 					}
 					break;
 
 				case 'resolvedPaths':
-					if (message.paths.length > 0 && elements.promptContent) {
+					if (state.config.enableFileReferences && message.paths.length > 0 && elements.promptContent) {
 						const textarea = elements.promptContent;
 						const cursorPos = textarea.selectionStart;
 						const text = textarea.value;

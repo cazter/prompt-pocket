@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
 import { PromptTreeDataProvider } from './treeDataProvider';
 import { StorageService } from './storage';
 import { PromptGroup, PromptItem, validatePromptData } from './types';
@@ -53,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Copy prompt to clipboard
 	const copyPromptCommand = vscode.commands.registerCommand('prompt-pocket.copyPrompt', async (item: PromptItem) => {
-		await vscode.env.clipboard.writeText(item.content);
+		await vscode.env.clipboard.writeText(normalizeClipboardContent(item.content));
 		if (shouldShowCopyNotification()) {
 			vscode.window.showInformationMessage(`Copied: ${item.title}`);
 		}
@@ -242,7 +243,7 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(selected.prompt.content);
+			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
 			if (shouldShowCopyNotification()) {
 				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
 			}
@@ -270,9 +271,14 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 			const data = await storage.load();
 			const jsonContent = JSON.stringify(data, null, 2);
+			const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+			const filename = `prompt-pocket-export-${timestamp}.json`;
+			const baseUri = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(os.homedir());
+			const defaultUri = vscode.Uri.joinPath(baseUri, filename);
 
 			const uri = await vscode.window.showSaveDialog({
-				defaultUri: vscode.Uri.file('prompt-pocket-export.json'),
+				defaultUri,
+				saveLabel: 'Export',
 				filters: {
 					// eslint-disable-next-line @typescript-eslint/naming-convention
 					'JSON Files': ['json']
@@ -412,7 +418,7 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(selected.prompt.content);
+			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
 			if (shouldShowCopyNotification()) {
 				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
 			}
@@ -445,6 +451,13 @@ export function deactivate() {}
 
 function generateId(): string {
 	return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function normalizeClipboardContent(content: string): string {
+	return content
+		.replace(/\r?\n+/g, ' ')
+		.replace(/[ \t]{2,}/g, ' ')
+		.trim();
 }
 
 /**

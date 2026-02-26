@@ -2,7 +2,7 @@
   "name": "prompt-pocket",
   "displayName": "Prompt Pocket",
   "description": "A lightweight VS Code extension for organizing and quickly copying reusable prompts",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "publisher": "cazter",
   "author": {
     "name": "Brent Allen"
@@ -170,6 +170,11 @@
           "type": "boolean",
           "default": true,
           "description": "Allow closing the prompt modal by clicking outside of it (when no unsaved changes)"
+        },
+        "promptPocket.enableFileReferences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable @ file references and drag-and-drop file linking in the prompt editor"
         }
       }
     },

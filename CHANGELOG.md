@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-04-21
+
+### Fixed
+- **Folder drag-and-drop now works.** Dragging a folder from the Cursor / VS Code Explorer (with `Shift` held) into a prompt modal now resolves correctly to an `@folder/path` reference. Previously the drop event was silently dropped because the URI sat in Cursor-specific keys (`resourceurls`, `codefiles`, plain `text/plain` absolute paths) that the drop handler did not parse.
+- **Multi-file drops insert one reference per line** instead of joining all paths on a single line with spaces. Single-file drops still get a trailing space so typing flow is preserved.
+- Drop handler now also dispatches an `input` event after inserting references so dirty-tracking and the mention menu pick up the change.
+- Workspace-root URI drops no longer silently disappear; they now resolve to the workspace folder name.
+
+### Added
+- New **"Prompt Pocket" Output channel** (View → Output → "Prompt Pocket") that surfaces drag-and-drop diagnostics. Stays silent during normal use; only auto-reveals when a drop reaches the modal but no URIs can be extracted, or when a drag arrives with unrecognized MIME types — making it easy to capture the data needed to file a bug if Cursor changes its drag format again.
+
+### Changed
+- Drop detection now accepts every known Cursor / VS Code drag MIME type: `text/uri-list`, `Files`, `application/vnd.code.uri-list`, every `application/vnd.code.tree.*` view, plus the lowercase `codeeditors`, `codefiles`, and `resourceurls` payloads used internally for tabs and files / folders.
+- JSON payload extractor now accepts both URIs and absolute filesystem paths (POSIX or Windows), converting bare paths to `file://` URIs before resolution.
+
 ## [0.1.7] - 2026-04-21
 
 ### Fixed
@@ -97,3 +112,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.5]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.5
 [0.1.6]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.6
 [0.1.7]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.7
+[0.1.8]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.8

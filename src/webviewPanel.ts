@@ -46,7 +46,8 @@ type WebviewMessage =
 	| { type: 'fileSearch'; query: string }
 	| { type: 'resolveUris'; uris: string[] }
 	| { type: 'export' }
-	| { type: 'import' };
+	| { type: 'import' }
+	| { type: 'diagnostic'; tag: string; payload: unknown; revealChannel?: boolean };
 
 type ExtensionMessage =
 	| { type: 'state'; data: PromptData; uiState: UIState; config: Config }
@@ -70,6 +71,13 @@ export class PromptPocketPanel {
 	private readonly context: vscode.ExtensionContext;
 	private disposables: vscode.Disposable[] = [];
 	private fileCache: { files: string[]; timestamp: number } = { files: [], timestamp: 0 };
+	private static outputChannel: vscode.OutputChannel | undefined;
+	private static getOutputChannel(): vscode.OutputChannel {
+		if (!PromptPocketPanel.outputChannel) {
+			PromptPocketPanel.outputChannel = vscode.window.createOutputChannel('Prompt Pocket');
+		}
+		return PromptPocketPanel.outputChannel;
+	}
 
 	private constructor(
 		panel: vscode.WebviewPanel,
@@ -414,14 +422,27 @@ export class PromptPocketPanel {
 				if (!this.getConfig().enableFileReferences) {
 					break;
 				}
-				const paths = message.uris.map(uriString => {
-					try {
-						const uri = vscode.Uri.parse(uriString);
-						return vscode.workspace.asRelativePath(uri, false);
-					} catch {
-						return null;
-					}
-				}).filter((p): p is string => p !== null);
+				// Resolve each URI to a workspace-relative path. For URIs outside
+				// the workspace, asRelativePath returns the absolute fsPath, which
+				// we still surface so users can reference siblings/peers. Empty
+				// strings (the workspace root itself) are dropped.
+				const paths = message.uris
+					.map(uriString => {
+						try {
+							const uri = vscode.Uri.parse(uriString, true);
+							const rel = vscode.workspace.asRelativePath(uri, false);
+							// asRelativePath returns '' for the workspace root URI;
+							// fall back to the folder name so the reference is useful.
+							if (!rel || rel === '') {
+								const folder = vscode.workspace.getWorkspaceFolder(uri);
+								return folder ? folder.name : uri.fsPath;
+							}
+							return rel;
+						} catch {
+							return null;
+						}
+					})
+					.filter((p): p is string => p !== null && p.length > 0);
 
 				this.postMessage({
 					type: 'resolvedPaths',
@@ -438,6 +459,28 @@ export class PromptPocketPanel {
 			case 'import': {
 				vscode.commands.executeCommand('prompt-pocket.import');
 				global.setTimeout(() => this.refreshState(), 500);
+				break;
+			}
+
+			case 'diagnostic': {
+				// Pipe webview-side diagnostics into the "Prompt Pocket" Output
+				// channel so users don't need to open the webview DevTools to
+				// see them. The webview can request the channel be revealed
+				// (e.g. after a drop) so first-time users find it instantly.
+				const channel = PromptPocketPanel.getOutputChannel();
+				const ts = new Date().toISOString();
+				let body: string;
+				try {
+					body = typeof message.payload === 'string'
+						? message.payload
+						: JSON.stringify(message.payload, null, 2);
+				} catch {
+					body = String(message.payload);
+				}
+				channel.appendLine(`[${ts}] ${message.tag}\n${body}`);
+				if (message.revealChannel) {
+					channel.show(true);
+				}
 				break;
 			}
 		}
@@ -2773,20 +2816,67 @@ export class PromptPocketPanel {
 
 		}
 
+		// Helper: pipe webview-side diagnostics back to the extension so they
+		// show up in the "Prompt Pocket" Output channel. Far easier to find
+		// than the webview DevTools console. Used sparingly — only when a
+		// drag is rejected with unknown types, or a drop yields no URIs —
+		// so the channel stays silent during normal use.
+		const sendDiagnostic = (tag, payload, revealChannel) => {
+			try {
+				vscode.postMessage({
+					type: 'diagnostic',
+					tag,
+					payload,
+					revealChannel: !!revealChannel
+				});
+			} catch (err) {
+				console.error('[prompt-pocket] failed to send diagnostic', err);
+			}
+		};
+
 		// Drag and drop file references — bound to the entire prompt modal
 		// container so users can drop anywhere in the modal, not just the
 		// textarea. Uses a counter to handle dragenter/dragleave firing for
-		// nested children, and falls back to dataTransfer.files when the OS
-		// (or VS Code) does not provide a text/uri-list payload.
+		// nested children, and tries multiple data formats (VS Code's
+		// proprietary application/vnd.code.uri-list, the standard
+		// text/uri-list, dataTransfer.files for OS drops, and a final
+		// dataTransfer.items walk that picks up folders Finder omits from
+		// .files). Multiple drops are deduped and inserted on separate lines.
 		if (elements.promptModalContainer && elements.promptModalDropOverlay) {
 			let dragDepth = 0;
 			const overlay = elements.promptModalDropOverlay;
 			const container = elements.promptModalContainer;
 
+			// Static MIME types we recognize as "this is a file/folder drag".
+			// We deliberately do NOT include 'text/plain' here, since that would
+			// hijack normal text-selection drags within the modal.
+			const FILE_DRAG_TYPES = new Set([
+				'text/uri-list',
+				'Files',
+				'application/vnd.code.uri-list',
+				// VS Code / Cursor use lowercase custom MIME types when
+				// dragging tabs or files from inside the IDE. 'resourceurls'
+				// is the one Cursor populates for FOLDER drags from Explorer.
+				'codeeditors',
+				'codefiles',
+				'resourceurls'
+			]);
+
 			const isFileDrag = (e) => {
-				const types = e.dataTransfer && e.dataTransfer.types;
-				if (!types) return false;
-				return Array.from(types).some(t => t === 'text/uri-list' || t === 'Files');
+				if (!e.dataTransfer) return false;
+				const types = e.dataTransfer.types;
+				if (!types || types.length === 0) return false;
+				return Array.from(types).some(t => {
+					if (FILE_DRAG_TYPES.has(t)) return true;
+					// VS Code / Cursor internal tree drags (Explorer, Search,
+					// Outline, etc.) come through as
+					// application/vnd.code.tree.<viewId>. Accept any of them so
+					// folders from the Explorer also light up the drop overlay.
+					if (t.indexOf('application/vnd.code.') === 0) return true;
+					// Catch-all for Cursor-specific extensions if any exist.
+					if (t.indexOf('application/vnd.cursor') === 0) return true;
+					return false;
+				});
 			};
 
 			const showOverlay = () => overlay.classList.add('visible');
@@ -2795,9 +2885,34 @@ export class PromptPocketPanel {
 				overlay.classList.remove('visible');
 			};
 
+			const parseUriListPayload = (payload, sink) => {
+				if (!payload) return;
+				// text/uri-list spec: lines separated by CRLF; '#' lines are comments
+				payload.split(/\\r?\\n/).forEach(line => {
+					const trimmed = line.trim();
+					if (trimmed && !trimmed.startsWith('#')) sink.push(trimmed);
+				});
+			};
+
+			const fsPathToUri = (fsPath) => {
+				if (!fsPath) return null;
+				// Normalize backslashes (Windows) and encode the path component.
+				return 'file://' + encodeURI(fsPath.replace(/\\\\/g, '/'));
+			};
+
 			container.addEventListener('dragenter', (e) => {
 				if (!state.config.enableFileReferences) return;
-				if (!isFileDrag(e)) return;
+				if (!isFileDrag(e)) {
+					// Surface unknown drag types so future Cursor / VS Code
+					// changes are easy to diagnose. Only fires when the drag
+					// actually carries data (so text-only drags don't spam).
+					if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.length > 0) {
+						sendDiagnostic('dragenter:unknown-types', {
+							types: Array.from(e.dataTransfer.types)
+						});
+					}
+					return;
+				}
 				e.preventDefault();
 				dragDepth++;
 				showOverlay();
@@ -2818,36 +2933,167 @@ export class PromptPocketPanel {
 				}
 			});
 
+			// Pull URIs out of a JSON payload that VS Code / Cursor use for
+			// tree / file drags. Observed shapes:
+			//   - ["file:///path/a", "file:///path/b"]      (resourceurls)
+			//   - ["/abs/path/a", "/abs/path/b"]            (codefiles)
+			//   - [{ resource: "file:///..." }, ...]        (some tree drags)
+			//   - { itemHandles: ["file:///..."], ... }     (other tree drags)
+			// Strings are accepted if they look like URIs (scheme://...) OR
+			// if they look like absolute filesystem paths (POSIX '/foo' or
+			// Windows 'C:\foo'); the latter are converted to file:// URIs.
+			const extractUrisFromTreePayload = (payload, sink) => {
+				if (!payload) return;
+				let data;
+				try { data = JSON.parse(payload); } catch { return; }
+				const URI_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\//;
+				const POSIX_PATH_RE = /^\\//;
+				const WINDOWS_PATH_RE = /^[a-zA-Z]:[\\\\\\/]/;
+				const collect = (val) => {
+					if (!val) return;
+					if (typeof val === 'string') {
+						if (URI_RE.test(val)) {
+							sink.push(val);
+						} else if (POSIX_PATH_RE.test(val) || WINDOWS_PATH_RE.test(val)) {
+							const uri = fsPathToUri(val);
+							if (uri) sink.push(uri);
+						}
+						return;
+					}
+					if (Array.isArray(val)) { val.forEach(collect); return; }
+					if (typeof val === 'object') {
+						// Common URI-bearing keys observed in VS Code tree drags
+						['resource', 'uri', 'fsPath', 'path', 'href'].forEach(k => {
+							if (val[k]) collect(val[k]);
+						});
+						// Collections of children
+						['itemHandles', 'items', 'resources', 'uris', 'elements'].forEach(k => {
+							if (val[k]) collect(val[k]);
+						});
+					}
+				};
+				collect(data);
+			};
+
 			container.addEventListener('drop', (e) => {
 				if (!state.config.enableFileReferences) return;
 				e.preventDefault();
 				hideOverlay();
+				if (!e.dataTransfer) return;
+
+				// Read every available type. We hold onto this snapshot only
+				// to surface in the failure diagnostic — successful drops
+				// don't log anything, keeping the Output channel quiet.
+				const allTypes = Array.from(e.dataTransfer.types || []);
+				const allData = {};
+				allTypes.forEach(t => {
+					try { allData[t] = e.dataTransfer.getData(t); }
+					catch (err) { allData[t] = '<getData failed: ' + err + '>'; }
+				});
 
 				const uris = [];
 
-				const uriList = e.dataTransfer.getData('text/uri-list');
-				if (uriList) {
-					// text/uri-list spec: lines separated by CRLF; '#' lines are comments
-					uriList.split(/\\r?\\n/).forEach(line => {
-						const trimmed = line.trim();
-						if (trimmed && !trimmed.startsWith('#')) uris.push(trimmed);
-					});
+				// 1) VS Code / Cursor specific URI list — preferred because it's
+				//    populated for both files AND folders dragged from the
+				//    Explorer (text/uri-list often omits folders).
+				parseUriListPayload(e.dataTransfer.getData('application/vnd.code.uri-list'), uris);
+
+				// 2) Standard text/uri-list (covers most Explorer drags w/ Shift,
+				//    cross-app drags from other editors, and most OS file drags).
+				if (uris.length === 0) {
+					parseUriListPayload(e.dataTransfer.getData('text/uri-list'), uris);
 				}
 
-				// Fallback: some drag sources (notably OS-level drops in Electron)
-				// only expose dataTransfer.files. In Electron, File objects carry
-				// an absolute filesystem 'path' that we can convert to a file:// URI.
-				if (uris.length === 0 && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-					Array.from(e.dataTransfer.files).forEach(file => {
-						const fsPath = file.path;
-						if (fsPath) {
-							uris.push('file://' + encodeURI(fsPath.replace(/\\\\/g, '/')));
+				// 3) VS Code tree-drag JSON payloads. These show up under
+				//    application/vnd.code.tree.<viewId> when dragging from any
+				//    tree view (Explorer, Search, Outline). For folders dragged
+				//    from the Explorer specifically, this is the ONLY source
+				//    that reliably contains the folder URI in some Cursor builds.
+				if (uris.length === 0) {
+					allTypes.forEach(t => {
+						if (t.indexOf('application/vnd.code.tree') === 0) {
+							extractUrisFromTreePayload(allData[t], uris);
 						}
 					});
 				}
 
-				if (uris.length > 0) {
-					vscode.postMessage({ type: 'resolveUris', uris });
+				// 4) VS Code / Cursor lowercase JSON payloads.
+				//    - 'resourceurls': JSON array of file:// URIs (Cursor's
+				//      Explorer uses this for both files AND folders).
+				//    - 'codefiles':    JSON array of absolute fs paths.
+				//    - 'codeeditors':  JSON describing dragged editor tabs.
+				if (uris.length === 0) {
+					['resourceurls', 'codefiles', 'codeeditors'].forEach(t => {
+						if (allData[t]) extractUrisFromTreePayload(allData[t], uris);
+					});
+				}
+
+				// 5) Plain text fallback — Cursor puts a single absolute fs path
+				//    here for folder drags from the Explorer. Accept either a
+				//    URI or an absolute path.
+				if (uris.length === 0) {
+					const plain = (e.dataTransfer.getData('text/plain') || '').trim();
+					if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\//.test(plain)) {
+						uris.push(plain);
+					} else if (/^\\//.test(plain) || /^[a-zA-Z]:[\\\\\\/]/.test(plain)) {
+						const u = fsPathToUri(plain);
+						if (u) uris.push(u);
+					}
+				}
+
+				// 6) dataTransfer.files — OS-level drops from Finder/Explorer.
+				//    In Electron, File objects expose an absolute 'path'. Folders
+				//    sometimes appear here as 0-byte File entries with a valid path.
+				if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+					Array.from(e.dataTransfer.files).forEach(file => {
+						const u = fsPathToUri(file && file.path);
+						if (u) uris.push(u);
+					});
+				}
+
+				// 7) dataTransfer.items — folder fallback. Browsers list folders
+				//    here even when they're absent from .files. Each item exposes
+				//    an Electron-only getAsFile() with .path that works for both
+				//    files and directories.
+				if (uris.length === 0 && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+					Array.from(e.dataTransfer.items).forEach(item => {
+						if (item.kind !== 'file') return;
+						const f = item.getAsFile && item.getAsFile();
+						const u = fsPathToUri(f && f.path);
+						if (u) uris.push(u);
+					});
+				}
+
+				// Dedupe while preserving order — multi-select drops can repeat
+				// the same URI across formats.
+				const seen = new Set();
+				const unique = uris.filter(u => {
+					if (seen.has(u)) return false;
+					seen.add(u);
+					return true;
+				});
+
+				if (unique.length > 0) {
+					vscode.postMessage({ type: 'resolveUris', uris: unique });
+				} else {
+					// Drop reached us but we couldn't pull URIs out of any
+					// known field. Dump everything we saw and reveal the
+					// channel so the user can see exactly what happened.
+					sendDiagnostic('drop:no-uris', {
+						hint: 'Drop event reached the modal but no URIs could be extracted. Please share this output if you expected the drop to insert a reference.',
+						types: allTypes,
+						fileCount: e.dataTransfer.files ? e.dataTransfer.files.length : 0,
+						itemCount: e.dataTransfer.items ? e.dataTransfer.items.length : 0,
+						data: allData,
+						files: e.dataTransfer.files
+							? Array.from(e.dataTransfer.files).map(f => ({
+								name: f.name, type: f.type, size: f.size, path: f.path
+							}))
+							: [],
+						items: e.dataTransfer.items
+							? Array.from(e.dataTransfer.items).map(i => ({ kind: i.kind, type: i.type }))
+							: []
+					}, true);
 				}
 			});
 		}
@@ -3561,13 +3807,20 @@ export class PromptPocketPanel {
 						const before = text.slice(0, cursorPos);
 						const after = text.slice(cursorPos);
 
-						// Insert each path as @reference with newlines between multiple
-						const insertion = message.paths.map(p => '@' + p).join(' ') + ' ';
+						// One path per line so users can scan / edit them
+						// individually. Trailing space for single drops keeps
+						// typing flow; trailing newline for multi keeps the list
+						// neatly terminated.
+						const refs = message.paths.map(p => '@' + p);
+						const tail = refs.length > 1 ? '\\n' : ' ';
+						const insertion = refs.join('\\n') + tail;
 						textarea.value = before + insertion + after;
 
 						const newCursor = cursorPos + insertion.length;
 						textarea.setSelectionRange(newCursor, newCursor);
 						textarea.focus();
+						// Trigger any input listeners (e.g. mention menu state)
+						textarea.dispatchEvent(new Event('input', { bubbles: true }));
 					}
 					break;
 			}

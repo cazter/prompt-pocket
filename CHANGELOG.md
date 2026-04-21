@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-21
+
+### Fixed
+- Activity Bar icon now displays the Prompt Pocket hexagon logo instead of an empty white placeholder; replaced the unsupported PNG reference with a properly themed `currentColor` SVG that adapts to dark and light themes automatically.
+
+### Changed
+- Upgraded the editor tab icon (shown when the Prompt Pocket panel is open) from a low-resolution PNG to per-theme SVG variants (`resources/icon-light.svg`, `resources/icon-dark.svg`) for crisp rendering at any DPI, with brand colors tuned for legibility on both light and dark tab backgrounds.
+
 ## [0.1.6] - 2026-04-21
 
 ### Added
@@ -88,3 +96,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.4]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.4
 [0.1.5]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.5
 [0.1.6]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.6
+[0.1.7]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.7

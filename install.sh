@@ -1,176 +1,302 @@
 #!/bin/bash
 
-# Prompt Pocket - Idempotent Installation Script for Cursor
-# This script compiles, packages, and installs the extension to Cursor
-# Can be run multiple times to update the extension
+# Prompt Pocket - Idempotent Local Installation Script
+#
+# Compiles, packages, and installs the extension into Cursor and/or VS Code
+# from the local source tree. Useful for testing pre-release builds without
+# going through a marketplace.
+#
+# By default this prompts you for which editor(s) to install into. You can
+# also pass flags or env vars to skip the prompt — see --help.
+#
+# Re-runnable: existing installs are uninstalled first so re-running picks up
+# new code automatically.
 
 set -e
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Extension details
-EXTENSION_NAME="prompt-pocket"
-EXTENSION_VERSION=$(node -p "require('./package.json').version")
-PUBLISHER=$(node -p "require('./package.json').publisher")
-VSIX_FILE="${EXTENSION_NAME}-${EXTENSION_VERSION}.vsix"
+# ----- Defaults / flag parsing -----------------------------------------------
 
-# Cursor CLI paths (common locations)
+# Tri-state: "" = ask the user, "true"/"false" = explicit
+INSTALL_CURSOR="${INSTALL_CURSOR:-}"
+INSTALL_VSCODE="${INSTALL_VSCODE:-}"
+KEEP_VSIX="${KEEP_VSIX:-}"  # "" = ask, "true"/"false" = explicit
+ASSUME_YES=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --cursor-only)  INSTALL_CURSOR=true;  INSTALL_VSCODE=false ;;
+        --vscode-only)  INSTALL_CURSOR=false; INSTALL_VSCODE=true ;;
+        --both)         INSTALL_CURSOR=true;  INSTALL_VSCODE=true ;;
+        --keep-vsix)    KEEP_VSIX=true ;;
+        --no-keep-vsix) KEEP_VSIX=false ;;
+        -y|--yes)       ASSUME_YES=true ;;
+        --help|-h)
+            cat <<EOF
+Usage: ./install.sh [options]
+
+Builds the extension from source and installs it locally into Cursor and/or
+VS Code. By default, prompts for which editor(s) to target.
+
+Options:
+  --cursor-only      Install into Cursor only (skip prompt)
+  --vscode-only      Install into VS Code only (skip prompt)
+  --both             Install into both editors (skip prompt)
+  --keep-vsix        Keep the built .vsix after install (skip prompt)
+  --no-keep-vsix     Delete the .vsix after install (skip prompt)
+  -y, --yes          Assume "yes" to all prompts (uses --both, --keep-vsix)
+  -h, --help         Show this help
+
+Environment variables (override defaults, ignored if a flag is also passed):
+  INSTALL_CURSOR=true|false
+  INSTALL_VSCODE=true|false
+  KEEP_VSIX=true|false
+EOF
+            exit 0
+            ;;
+    esac
+done
+
+if $ASSUME_YES; then
+    [ -z "$INSTALL_CURSOR" ] && INSTALL_CURSOR=true
+    [ -z "$INSTALL_VSCODE" ] && INSTALL_VSCODE=true
+    [ -z "$KEEP_VSIX" ]      && KEEP_VSIX=true
+fi
+
+# Print helpers
+print_step()    { echo -e "${BLUE}==>${NC} $1"; }
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_error()   { echo -e "${RED}✗${NC} $1"; }
+print_warning() { echo -e "${YELLOW}!${NC} $1"; }
+print_info()    { echo -e "${CYAN}ℹ${NC} $1"; }
+
+# ----- Editor CLI discovery --------------------------------------------------
+
+# Common install locations per editor (macOS first, then *nix fallbacks).
 CURSOR_CLI_PATHS=(
     "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
     "/usr/local/bin/cursor"
     "$HOME/.cursor/bin/cursor"
+    "$HOME/.local/bin/cursor"
+)
+VSCODE_CLI_PATHS=(
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+    "/usr/local/bin/code"
+    "/usr/bin/code"
+    "$HOME/.local/bin/code"
 )
 
-# Function to print colored output
-print_step() {
-    echo -e "${BLUE}==>${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}!${NC} $1"
-}
-
-# Function to find Cursor CLI
-find_cursor_cli() {
-    for path in "${CURSOR_CLI_PATHS[@]}"; do
-        if [ -f "$path" ]; then
-            echo "$path"
-            return 0
-        fi
+# Resolve a usable CLI binary for an editor: returns the path, or empty if not
+# found. Falls back to whatever is on $PATH.
+find_editor_cli() {
+    local cli_name="$1"; shift
+    local paths=("$@")
+    for p in "${paths[@]}"; do
+        [ -x "$p" ] && { echo "$p"; return 0; }
     done
+    if command -v "$cli_name" &> /dev/null; then
+        command -v "$cli_name"
+        return 0
+    fi
     return 1
 }
 
-# Main installation process
-main() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  Prompt Pocket - Installation Script for Cursor${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+# ----- Editor selection ------------------------------------------------------
+
+prompt_editor_selection() {
+    # Probe what's actually installed so we can show a smarter prompt.
+    local cursor_cli vscode_cli cursor_status vscode_status
+    cursor_cli="$(find_editor_cli "cursor" "${CURSOR_CLI_PATHS[@]}" || true)"
+    vscode_cli="$(find_editor_cli "code"   "${VSCODE_CLI_PATHS[@]}"   || true)"
+
+    cursor_status=$([ -n "$cursor_cli" ] && echo "detected" || echo "not detected")
+    vscode_status=$([ -n "$vscode_cli" ] && echo "detected" || echo "not detected")
+
+    echo ""
+    print_info "Where would you like to install Prompt Pocket?"
+    echo "    1) Cursor only          (CLI $cursor_status)"
+    echo "    2) VS Code only         (CLI $vscode_status)"
+    echo "    3) Both Cursor and VS Code  (default)"
+    echo "    4) Cancel"
     echo ""
 
-    # Check if we're in the right directory
+    local choice
+    read -p "$(echo -e ${YELLOW}Select [1-4, default=3]:${NC} )" -r choice
+    case "$choice" in
+        1)        INSTALL_CURSOR=true;  INSTALL_VSCODE=false ;;
+        2)        INSTALL_CURSOR=false; INSTALL_VSCODE=true ;;
+        3|"")     INSTALL_CURSOR=true;  INSTALL_VSCODE=true ;;
+        4|q|Q)    print_warning "Cancelled."; exit 0 ;;
+        *)        print_error "Invalid selection: '$choice'"; exit 1 ;;
+    esac
+}
+
+# ----- Install into one editor -----------------------------------------------
+
+install_into_editor() {
+    local name="$1"
+    local cli_name="$2"
+    local cli_path="$3"
+    local vsix_file="$4"
+    local full_ext_id="$5"
+
+    echo ""
+    echo -e "${BLUE}━━ Installing into $name ━━${NC}"
+
+    if [ -z "$cli_path" ]; then
+        print_error "$name CLI ('$cli_name') not found in standard locations or on PATH."
+        echo ""
+        echo "  To install manually instead:"
+        echo "    1. Open $name"
+        echo "    2. Cmd+Shift+P (macOS) or Ctrl+Shift+P (Win/Linux)"
+        echo "    3. Run 'Extensions: Install from VSIX...'"
+        echo "    4. Select: $(pwd)/$vsix_file"
+        return 1
+    fi
+    print_success "$name CLI: $cli_path"
+
+    print_step "Checking for existing installation..."
+    if "$cli_path" --list-extensions 2>/dev/null | grep -qx "$full_ext_id"; then
+        print_warning "Existing $full_ext_id found, uninstalling..."
+        "$cli_path" --uninstall-extension "$full_ext_id" >/dev/null 2>&1 || true
+        print_success "Uninstalled existing version"
+    else
+        print_info "No existing installation"
+    fi
+
+    print_step "Installing $vsix_file into $name..."
+    "$cli_path" --install-extension "$vsix_file" --force
+    print_success "$name install complete"
+    return 0
+}
+
+# ----- Main ------------------------------------------------------------------
+
+main() {
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}  Prompt Pocket - Local Build & Install${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
     if [ ! -f "package.json" ]; then
-        print_error "package.json not found. Please run this script from the extension root directory."
+        print_error "package.json not found. Run this from the extension root."
         exit 1
     fi
 
-    # Step 1: Check for pnpm
+    local extension_name extension_version publisher vsix_file full_ext_id
+    extension_name=$(node -p "require('./package.json').name")
+    extension_version=$(node -p "require('./package.json').version")
+    publisher=$(node -p "require('./package.json').publisher")
+    vsix_file="${extension_name}-${extension_version}.vsix"
+    full_ext_id="${publisher}.${extension_name}"
+
+    print_info "Building $full_ext_id v$extension_version"
+
+    # Decide editors before building so we can fail fast if user cancels.
+    if [ -z "$INSTALL_CURSOR" ] && [ -z "$INSTALL_VSCODE" ]; then
+        prompt_editor_selection
+    else
+        # Fill any unset side as false so logic below is well-defined.
+        [ -z "$INSTALL_CURSOR" ] && INSTALL_CURSOR=false
+        [ -z "$INSTALL_VSCODE" ] && INSTALL_VSCODE=false
+    fi
+
+    if [ "$INSTALL_CURSOR" != "true" ] && [ "$INSTALL_VSCODE" != "true" ]; then
+        print_error "No editor selected — nothing to do."
+        exit 1
+    fi
+
+    # ---- Build pipeline ----
     print_step "Checking for pnpm..."
     if ! command -v pnpm &> /dev/null; then
-        print_error "pnpm is not installed. Please install it first:"
-        echo "  npm install -g pnpm"
+        print_error "pnpm is not installed. Install it with: npm install -g pnpm"
         exit 1
     fi
     print_success "pnpm found"
 
-    # Step 2: Install dependencies
     print_step "Installing dependencies..."
     pnpm install --silent
     print_success "Dependencies installed"
 
-    # Step 3: Compile TypeScript
     print_step "Compiling TypeScript..."
     pnpm run compile
     print_success "TypeScript compiled"
 
-    # Step 4: Check for vsce (VS Code Extension Manager)
     print_step "Checking for vsce..."
-    if ! command -v vsce &> /dev/null; then
+    # Prefer the locally-installed devDependency over a global install so we
+    # use the version the project was tested against.
+    local vsce_cmd=""
+    if pnpm exec vsce --version >/dev/null 2>&1; then
+        vsce_cmd="pnpm exec vsce"
+        print_success "vsce found (local devDependency)"
+    elif command -v vsce &> /dev/null; then
+        vsce_cmd="vsce"
+        print_success "vsce found (global)"
+    else
         print_warning "vsce not found, installing globally..."
         pnpm add -g @vscode/vsce
+        vsce_cmd="vsce"
         print_success "vsce installed"
-    else
-        print_success "vsce found"
     fi
 
-    # Step 5: Package extension
     print_step "Packaging extension..."
-    if [ -f "$VSIX_FILE" ]; then
-        rm "$VSIX_FILE"
-        print_warning "Removed existing $VSIX_FILE"
-    fi
-    
-    vsce package --no-dependencies
-    print_success "Extension packaged as $VSIX_FILE"
+    [ -f "$vsix_file" ] && rm "$vsix_file" && print_warning "Removed stale $vsix_file"
+    $vsce_cmd package --no-dependencies
+    print_success "Packaged: $vsix_file"
 
-    # Step 6: Find Cursor CLI
-    print_step "Locating Cursor CLI..."
-    CURSOR_CLI=$(find_cursor_cli)
-    
-    if [ -z "$CURSOR_CLI" ]; then
-        print_warning "Cursor CLI not found in standard locations."
-        print_warning "Trying to use 'cursor' from PATH..."
-        
-        if command -v cursor &> /dev/null; then
-            CURSOR_CLI="cursor"
-            print_success "Found cursor in PATH"
-        else
-            print_error "Could not find Cursor CLI. Please ensure Cursor is installed."
-            echo ""
-            echo "To install the extension manually:"
-            echo "  1. Open Cursor"
-            echo "  2. Press Cmd+Shift+P (Mac) or Ctrl+Shift+P (Windows/Linux)"
-            echo "  3. Type 'Extensions: Install from VSIX'"
-            echo "  4. Select: $(pwd)/$VSIX_FILE"
-            exit 1
-        fi
-    else
-        print_success "Found Cursor CLI at: $CURSOR_CLI"
+    # ---- Resolve CLIs and install ----
+    local cursor_cli="" vscode_cli=""
+    [ "$INSTALL_CURSOR" = "true" ] && cursor_cli="$(find_editor_cli "cursor" "${CURSOR_CLI_PATHS[@]}" || true)"
+    [ "$INSTALL_VSCODE" = "true" ] && vscode_cli="$(find_editor_cli "code"   "${VSCODE_CLI_PATHS[@]}"   || true)"
+
+    local cursor_ok=true vscode_ok=true
+    if [ "$INSTALL_CURSOR" = "true" ]; then
+        install_into_editor "Cursor" "cursor" "$cursor_cli" "$vsix_file" "$full_ext_id" || cursor_ok=false
+    fi
+    if [ "$INSTALL_VSCODE" = "true" ]; then
+        install_into_editor "VS Code" "code" "$vscode_cli" "$vsix_file" "$full_ext_id" || vscode_ok=false
     fi
 
-    # Step 7: Uninstall existing version (if any)
-    print_step "Checking for existing installation..."
-    FULL_EXTENSION_ID="${PUBLISHER}.${EXTENSION_NAME}"
-    
-    if "$CURSOR_CLI" --list-extensions | grep -q "$FULL_EXTENSION_ID"; then
-        print_warning "Existing installation found, uninstalling..."
-        "$CURSOR_CLI" --uninstall-extension "$FULL_EXTENSION_ID" 2>/dev/null || true
-        print_success "Uninstalled existing version"
-    else
-        print_success "No existing installation found"
+    # ---- VSIX cleanup ----
+    echo ""
+    if [ -z "$KEEP_VSIX" ]; then
+        read -p "$(echo -e ${YELLOW}Keep the built ${vsix_file}? [y/N]:${NC} )" -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] && KEEP_VSIX=true || KEEP_VSIX=false
+    fi
+    if [ "$KEEP_VSIX" != "true" ] && [ -f "$vsix_file" ]; then
+        rm "$vsix_file"
+        print_success "Removed $vsix_file"
+    elif [ -f "$vsix_file" ]; then
+        print_info "Kept $vsix_file"
     fi
 
-    # Step 8: Install extension
-    print_step "Installing extension to Cursor..."
-    "$CURSOR_CLI" --install-extension "$VSIX_FILE"
-    print_success "Extension installed successfully!"
-
-    # Step 9: Cleanup (optional)
-    read -p "$(echo -e ${YELLOW}Do you want to keep the .vsix file? [y/N]:${NC} )" -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        rm "$VSIX_FILE"
-        print_success "Cleaned up $VSIX_FILE"
-    fi
-
+    # ---- Summary ----
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  Installation Complete!${NC}"
+    echo -e "${GREEN}  Installation Summary${NC}"
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    print_success "Prompt Pocket v${EXTENSION_VERSION} is now installed in Cursor"
+    [ "$INSTALL_CURSOR" = "true" ] && { $cursor_ok && print_success "Cursor:  installed v$extension_version" || print_error  "Cursor:  install FAILED"; }
+    [ "$INSTALL_VSCODE" = "true" ] && { $vscode_ok && print_success "VS Code: installed v$extension_version" || print_error  "VS Code: install FAILED"; }
     echo ""
     echo "Next steps:"
-    echo "  1. Restart Cursor (or reload window: Cmd+Shift+P > 'Reload Window')"
-    echo "  2. Look for the Prompt Pocket icon in the Activity Bar (left sidebar)"
-    echo "  3. Start organizing your prompts!"
+    echo "  1. Reload the affected editor(s) (Cmd+Shift+P → 'Developer: Reload Window')"
+    echo "     or fully restart for icon / activation event changes"
+    echo "  2. Look for the Prompt Pocket icon in the Activity Bar"
+    echo "  3. Cmd+Alt+P (or Ctrl+Alt+P) to open the panel"
     echo ""
-    print_warning "Note: If you don't see the extension, try restarting Cursor completely."
-    echo ""
+
+    # Non-zero exit if any selected install failed, so CI/scripts catch it.
+    if { [ "$INSTALL_CURSOR" = "true" ] && ! $cursor_ok; } || { [ "$INSTALL_VSCODE" = "true" ] && ! $vscode_ok; }; then
+        exit 2
+    fi
 }
 
-# Run main function
 main

@@ -21,9 +21,15 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 - **Import / export**: back up or share prompt libraries as JSON
 - **100% local**: no telemetry, no accounts, no cloud syncing
 
+## Install
+
+- **VS Code** — search for *Prompt Pocket* in the Extensions sidebar, or install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=cazter.prompt-pocket).
+- **Cursor, VSCodium, Gitpod, code-server, and other VS Code forks** — search for *Prompt Pocket* in the Extensions sidebar, or install from the [Open VSX Registry](https://open-vsx.org/extension/cazter/prompt-pocket). Forks of VS Code can't legally pull from Microsoft's marketplace, so we publish to Open VSX in parallel.
+- **Manual `.vsix` install** — grab the `.vsix` from the [latest GitHub release](https://github.com/cazter/prompt-pocket/releases/latest), then in your editor: Extensions sidebar → `…` overflow menu → **Install from VSIX…**.
+
 ## Getting Started
 
-After installing from the Marketplace:
+After installing:
 
 1. Click the Prompt Pocket icon in the Activity Bar to open the sidebar tree.
 2. Press `Cmd+Alt+P` (`Ctrl+Alt+P` on Windows / Linux) to open the editor panel in a tab.

@@ -1,7 +1,16 @@
 #!/bin/bash
 
-# Prompt Pocket - VS Code Marketplace Publishing Script
-# This script handles the complete publishing workflow to the VS Code Marketplace
+# Prompt Pocket - Marketplace Publishing Script
+#
+# Publishes the extension to BOTH:
+#   1. Visual Studio Marketplace (used by VS Code)            — via `vsce`
+#   2. Open VSX Registry          (used by Cursor, VSCodium,
+#                                   Gitpod, code-server, etc.) — via `ovsx`
+#
+# Both registries are fed the SAME `.vsix` artifact so installs are identical
+# across editors. Open VSX exists because Microsoft's Marketplace ToS
+# prohibits non-Microsoft products from accessing it directly, so VS Code
+# forks like Cursor pull from Open VSX instead.
 
 set -e
 
@@ -18,66 +27,92 @@ EXTENSION_NAME=$(node -p "require('./package.json').name")
 EXTENSION_VERSION=$(node -p "require('./package.json').version")
 PUBLISHER=$(node -p "require('./package.json').publisher")
 
+# Toggles (env or CLI flag). Default: publish to both.
+PUBLISH_VSCE=${PUBLISH_VSCE:-true}
+PUBLISH_OVSX=${PUBLISH_OVSX:-true}
+
+for arg in "$@"; do
+    case "$arg" in
+        --skip-vsce|--ovsx-only) PUBLISH_VSCE=false ;;
+        --skip-ovsx|--vsce-only) PUBLISH_OVSX=false ;;
+        --help|-h)
+            cat <<EOF
+Usage: ./publish.sh [options]
+
+Options:
+  --skip-ovsx, --vsce-only    Publish only to Visual Studio Marketplace
+  --skip-vsce, --ovsx-only    Publish only to Open VSX (Cursor / VSCodium)
+  -h, --help                  Show this help
+
+Required environment variables:
+  VSCE_PAT    Personal Access Token for Visual Studio Marketplace
+  OVSX_PAT    Personal Access Token for Open VSX Registry
+
+Either token can be omitted if the corresponding registry is skipped.
+EOF
+            exit 0
+            ;;
+    esac
+done
+
 # Function to print colored output
-print_step() {
-    echo -e "${BLUE}==>${NC} $1"
-}
+print_step()    { echo -e "${BLUE}==>${NC} $1"; }
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_error()   { echo -e "${RED}✗${NC} $1"; }
+print_warning() { echo -e "${YELLOW}!${NC} $1"; }
+print_info()    { echo -e "${CYAN}ℹ${NC} $1"; }
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
+# ----- Token checks -----------------------------------------------------------
 
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}!${NC} $1"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ${NC} $1"
-}
-
-# Function to check if PAT is configured
-check_pat() {
+check_vsce_pat() {
     if [ -z "$VSCE_PAT" ]; then
         print_error "VSCE_PAT environment variable not set"
         echo ""
-        echo "To publish to the VS Code Marketplace, you need a Personal Access Token (PAT)."
-        echo ""
-        echo "Setup instructions:"
+        echo "To publish to the Visual Studio Marketplace, you need a Personal Access Token:"
         echo "  1. Go to https://dev.azure.com"
-        echo "  2. Create an organization (if you don't have one)"
-        echo "  3. Go to User Settings > Personal Access Tokens"
-        echo "  4. Click 'New Token'"
-        echo "  5. Name: 'VS Code Marketplace'"
-        echo "  6. Organization: 'All accessible organizations'"
-        echo "  7. Scopes: 'Marketplace' > 'Manage'"
-        echo "  8. Click 'Create'"
+        echo "  2. User Settings → Personal Access Tokens → New Token"
+        echo "  3. Name: 'VS Code Marketplace'"
+        echo "  4. Organization: 'All accessible organizations'"
+        echo "  5. Scopes: 'Marketplace' → 'Manage'"
         echo ""
-        echo "Then set the token as an environment variable:"
+        echo "Then export it:"
         echo "  export VSCE_PAT='your-token-here'"
         echo ""
-        echo "Or add it to your ~/.bashrc or ~/.zshrc:"
-        echo "  echo 'export VSCE_PAT=\"your-token-here\"' >> ~/.bashrc"
-        echo ""
+        echo "Tip: pass --skip-vsce to skip this registry."
         exit 1
     fi
 }
 
-# Function to check if publisher is registered
-check_publisher() {
-    print_step "Verifying publisher registration..."
-    
+check_ovsx_pat() {
+    if [ -z "$OVSX_PAT" ]; then
+        print_error "OVSX_PAT environment variable not set"
+        echo ""
+        echo "To publish to Open VSX (used by Cursor, VSCodium, Gitpod, code-server, etc.):"
+        echo "  1. Go to https://open-vsx.org and sign in with GitHub or Eclipse account"
+        echo "  2. Click your avatar → Settings → 'Publisher Agreement' (sign it once per account)"
+        echo "  3. Click your avatar → Settings → 'Namespaces' → create namespace '$PUBLISHER'"
+        echo "     (must exactly match the 'publisher' field in package.json)"
+        echo "  4. Click your avatar → Settings → 'Access Tokens' → 'Generate New Token'"
+        echo ""
+        echo "Then export it:"
+        echo "  export OVSX_PAT='your-token-here'"
+        echo ""
+        echo "Tip: pass --skip-ovsx to skip this registry."
+        exit 1
+    fi
+}
+
+# ----- Publisher / namespace verification -------------------------------------
+
+check_vsce_publisher() {
+    print_step "Verifying VS Marketplace publisher registration..."
     if ! vsce publishers list 2>/dev/null | grep -q "$PUBLISHER"; then
-        print_warning "Publisher '$PUBLISHER' may not be registered"
+        print_warning "Publisher '$PUBLISHER' may not be registered on the Visual Studio Marketplace"
         echo ""
         echo "To register a publisher:"
         echo "  1. Go to https://marketplace.visualstudio.com/manage"
         echo "  2. Sign in with the same account you used for the PAT"
-        echo "  3. Click 'Create publisher'"
-        echo "  4. Use publisher ID: '$PUBLISHER'"
+        echo "  3. Click 'Create publisher' and use publisher ID: '$PUBLISHER'"
         echo ""
         read -p "$(echo -e ${YELLOW}Have you registered this publisher? [y/N]:${NC} )" -n 1 -r
         echo
@@ -86,45 +121,86 @@ check_publisher() {
             exit 1
         fi
     else
-        print_success "Publisher verified"
+        print_success "VS Marketplace publisher verified"
     fi
 }
 
-# Function to verify version
-verify_version() {
-    print_step "Checking version..."
-    
-    # Try to get the current published version
-    CURRENT_VERSION=$(vsce show "$PUBLISHER.$EXTENSION_NAME" --json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0, 'utf-8')).versions[0].version" 2>/dev/null || echo "none")
-    
-    if [ "$CURRENT_VERSION" != "none" ]; then
-        print_info "Current published version: $CURRENT_VERSION"
-        print_info "New version to publish: $EXTENSION_VERSION"
-        
-        # Simple version comparison
-        if [ "$CURRENT_VERSION" = "$EXTENSION_VERSION" ]; then
-            print_error "Version $EXTENSION_VERSION is already published"
-            echo ""
-            echo "Please update the version in package.json:"
-            echo "  - Patch (bug fix): npm version patch"
-            echo "  - Minor (new feature): npm version minor"
-            echo "  - Major (breaking change): npm version major"
-            echo ""
+# ----- Version verification ---------------------------------------------------
+
+verify_version_vsce() {
+    print_step "Checking VS Marketplace version..."
+    local current
+    current=$(vsce show "$PUBLISHER.$EXTENSION_NAME" --json 2>/dev/null \
+        | node -p "JSON.parse(require('fs').readFileSync(0, 'utf-8')).versions[0].version" 2>/dev/null \
+        || echo "none")
+
+    if [ "$current" != "none" ]; then
+        print_info "VS Marketplace current: $current — new: $EXTENSION_VERSION"
+        if [ "$current" = "$EXTENSION_VERSION" ]; then
+            print_error "Version $EXTENSION_VERSION is already published to the VS Marketplace"
+            echo "Bump the version in package.json before re-running."
             exit 1
         fi
     else
-        print_info "This appears to be the first publication"
+        print_info "First publication to the VS Marketplace"
     fi
-    
-    print_success "Version $EXTENSION_VERSION is ready to publish"
+    print_success "Version $EXTENSION_VERSION OK for VS Marketplace"
 }
 
-# Main publishing workflow
+verify_version_ovsx() {
+    print_step "Checking Open VSX version..."
+    local current
+    current=$(curl -fsSL "https://open-vsx.org/api/$PUBLISHER/$EXTENSION_NAME" 2>/dev/null \
+        | node -p "JSON.parse(require('fs').readFileSync(0, 'utf-8')).version" 2>/dev/null \
+        || echo "none")
+
+    if [ "$current" != "none" ] && [ "$current" != "undefined" ]; then
+        print_info "Open VSX current: $current — new: $EXTENSION_VERSION"
+        if [ "$current" = "$EXTENSION_VERSION" ]; then
+            print_warning "Version $EXTENSION_VERSION is already published to Open VSX"
+            print_warning "Will skip Open VSX publish step."
+            PUBLISH_OVSX=false
+            return
+        fi
+    else
+        print_info "First publication to Open VSX (or namespace not yet created)"
+    fi
+    print_success "Version $EXTENSION_VERSION OK for Open VSX"
+}
+
+# ----- Tooling checks ---------------------------------------------------------
+
+ensure_vsce() {
+    if ! command -v vsce &> /dev/null; then
+        print_warning "vsce not found globally; using local devDependency via pnpm exec"
+        VSCE_CMD="pnpm exec vsce"
+    else
+        VSCE_CMD="vsce"
+    fi
+}
+
+ensure_ovsx() {
+    if ! command -v ovsx &> /dev/null; then
+        print_warning "ovsx not found globally; using local devDependency via pnpm exec"
+        OVSX_CMD="pnpm exec ovsx"
+    else
+        OVSX_CMD="ovsx"
+    fi
+}
+
+# ----- Main workflow ----------------------------------------------------------
+
 main() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  Prompt Pocket - VS Code Marketplace Publishing${NC}"
+    echo -e "${BLUE}  Prompt Pocket - Marketplace Publishing${NC}"
+    echo -e "${BLUE}  Targets: $( [ "$PUBLISH_VSCE" = "true" ] && echo -n "VS Marketplace " )$( [ "$PUBLISH_OVSX" = "true" ] && echo -n "Open VSX (Cursor/VSCodium)" )${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+
+    if [ "$PUBLISH_VSCE" != "true" ] && [ "$PUBLISH_OVSX" != "true" ]; then
+        print_error "Both registries skipped — nothing to do."
+        exit 1
+    fi
 
     # Step 1: Verify we're in the right directory
     if [ ! -f "package.json" ]; then
@@ -140,31 +216,25 @@ main() {
     fi
     print_success "pnpm found"
 
-    # Step 3: Check for vsce
-    print_step "Checking for vsce..."
-    if ! command -v vsce &> /dev/null; then
-        print_warning "vsce not found, installing..."
-        pnpm add -g @vscode/vsce
-        print_success "vsce installed"
-    else
-        print_success "vsce found"
-    fi
-
-    # Step 4: Check PAT
-    check_pat
-
-    # Step 5: Verify publisher
-    check_publisher
-
-    # Step 6: Verify version
-    verify_version
-
-    # Step 7: Clean install
+    # Step 3: Install dependencies (also brings in vsce/ovsx via devDependencies)
     print_step "Installing dependencies..."
     pnpm install --frozen-lockfile
     print_success "Dependencies installed"
 
-    # Step 8: Lint
+    # Step 4: Tooling resolution
+    [ "$PUBLISH_VSCE" = "true" ] && ensure_vsce
+    [ "$PUBLISH_OVSX" = "true" ] && ensure_ovsx
+
+    # Step 5: Token checks
+    [ "$PUBLISH_VSCE" = "true" ] && check_vsce_pat
+    [ "$PUBLISH_OVSX" = "true" ] && check_ovsx_pat
+
+    # Step 6: Publisher / version verification
+    [ "$PUBLISH_VSCE" = "true" ] && check_vsce_publisher
+    [ "$PUBLISH_VSCE" = "true" ] && verify_version_vsce
+    [ "$PUBLISH_OVSX" = "true" ] && verify_version_ovsx
+
+    # Step 7: Lint
     print_step "Running linter..."
     if ! pnpm run lint; then
         print_error "Linting failed. Please fix errors before publishing."
@@ -172,29 +242,22 @@ main() {
     fi
     print_success "Linting passed"
 
-    # Step 9: Compile
+    # Step 8: Compile
     print_step "Compiling TypeScript..."
     pnpm run compile
     print_success "TypeScript compiled"
 
-    # Step 10: Run tests
+    # Step 9: Tests (skipped — requires display server)
     print_step "Running tests..."
     print_warning "Skipping tests (requires display server)"
-    # Uncomment if you have headless test setup:
-    # if ! pnpm run test; then
-    #     print_error "Tests failed. Please fix before publishing."
-    #     exit 1
-    # fi
-    # print_success "Tests passed"
 
-    # Step 11: Show changelog prompt
+    # Step 10: Pre-publish checklist
     echo ""
     print_warning "Pre-publish checklist:"
     echo "  - [ ] CHANGELOG.md updated for version $EXTENSION_VERSION"
     echo "  - [ ] README.md reflects all current features"
     echo "  - [ ] package.json version is correct: $EXTENSION_VERSION"
     echo "  - [ ] All changes committed to git"
-    echo "  - [ ] Tests pass locally"
     echo ""
     read -p "$(echo -e ${YELLOW}Continue with publishing? [y/N]:${NC} )" -n 1 -r
     echo
@@ -203,34 +266,57 @@ main() {
         exit 0
     fi
 
-    # Step 12: Package extension
+    # Step 11: Package extension (build the .vsix once, push to both registries)
     print_step "Packaging extension..."
     VSIX_FILE="${EXTENSION_NAME}-${EXTENSION_VERSION}.vsix"
     if [ -f "$VSIX_FILE" ]; then
         rm "$VSIX_FILE"
         print_warning "Removed existing $VSIX_FILE"
     fi
-    vsce package --no-dependencies
+    # Use vsce to build the package; if vsce-only is disabled we still need the
+    # .vsix for ovsx, so we install vsce on demand for the build step.
+    if [ -z "$VSCE_CMD" ]; then
+        ensure_vsce
+    fi
+    $VSCE_CMD package --no-dependencies
     print_success "Extension packaged: $VSIX_FILE"
 
-    # Step 13: Publish
-    print_step "Publishing to VS Code Marketplace..."
-    echo ""
-    print_info "Publishing $PUBLISHER.$EXTENSION_NAME@$EXTENSION_VERSION..."
-    echo ""
-    
-    vsce publish --packagePath "$VSIX_FILE" -p "$VSCE_PAT"
-    
-    print_success "Published successfully!"
+    # Step 12: Publish to Visual Studio Marketplace
+    if [ "$PUBLISH_VSCE" = "true" ]; then
+        echo ""
+        print_step "Publishing to Visual Studio Marketplace..."
+        print_info "Publishing $PUBLISHER.$EXTENSION_NAME@$EXTENSION_VERSION..."
+        $VSCE_CMD publish --packagePath "$VSIX_FILE" -p "$VSCE_PAT"
+        print_success "Published to Visual Studio Marketplace"
+    fi
 
-    # Step 14: Create git tag
+    # Step 13: Publish to Open VSX (Cursor / VSCodium / etc.)
+    if [ "$PUBLISH_OVSX" = "true" ]; then
+        echo ""
+        print_step "Publishing to Open VSX Registry..."
+        print_info "Publishing $PUBLISHER.$EXTENSION_NAME@$EXTENSION_VERSION..."
+        # ovsx publish reads the .vsix metadata; -p supplies the PAT.
+        if ! $OVSX_CMD publish "$VSIX_FILE" -p "$OVSX_PAT"; then
+            print_error "Open VSX publish failed."
+            print_warning "If this is your first publish, ensure the namespace '$PUBLISHER' exists at:"
+            print_warning "  https://open-vsx.org/user-settings/namespaces"
+            exit 1
+        fi
+        print_success "Published to Open VSX (available in Cursor / VSCodium within minutes)"
+    fi
+
+    # Step 14: Git tag
     echo ""
     read -p "$(echo -e ${YELLOW}Create git tag v${EXTENSION_VERSION}? [Y/n]:${NC} )" -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        git tag "v${EXTENSION_VERSION}"
-        print_success "Git tag created: v${EXTENSION_VERSION}"
-        
+        if git rev-parse "v${EXTENSION_VERSION}" >/dev/null 2>&1; then
+            print_warning "Tag v${EXTENSION_VERSION} already exists locally — skipping tag creation"
+        else
+            git tag "v${EXTENSION_VERSION}"
+            print_success "Git tag created: v${EXTENSION_VERSION}"
+        fi
+
         read -p "$(echo -e ${YELLOW}Push tag to remote? [Y/n]:${NC} )" -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
@@ -257,14 +343,14 @@ main() {
     print_success "Extension published: $PUBLISHER.$EXTENSION_NAME@$EXTENSION_VERSION"
     echo ""
     echo "Next steps:"
-    echo "  1. Check marketplace: https://marketplace.visualstudio.com/items?itemName=$PUBLISHER.$EXTENSION_NAME"
-    echo "  2. Extension will be available in ~5-10 minutes"
-    echo "  3. Create GitHub release: https://github.com/cazter/prompt-pocket/releases/new"
-    echo "  4. Announce the release!"
+    [ "$PUBLISH_VSCE" = "true" ] && echo "  - VS Code:           https://marketplace.visualstudio.com/items?itemName=$PUBLISHER.$EXTENSION_NAME"
+    [ "$PUBLISH_OVSX" = "true" ] && echo "  - Cursor / VSCodium: https://open-vsx.org/extension/$PUBLISHER/$EXTENSION_NAME"
+    echo "  - Allow ~5–15 minutes for marketplace caches to refresh."
+    echo "  - Create a GitHub release: https://github.com/cazter/prompt-pocket/releases/new"
     echo ""
-    print_info "Users can install with: code --install-extension $PUBLISHER.$EXTENSION_NAME"
+    print_info "Install in VS Code: code --install-extension $PUBLISHER.$EXTENSION_NAME"
+    print_info "Install in Cursor:  cursor --install-extension $PUBLISHER.$EXTENSION_NAME"
     echo ""
 }
 
-# Run main function
 main

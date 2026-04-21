@@ -114,10 +114,13 @@ export class PromptPocketPanel {
 			}
 		);
 
-		// Set the panel icon
-		panel.iconPath = vscode.Uri.file(
-			path.join(context.extensionPath, 'resources', 'icon.png')
-		);
+		// Editor tab icons are rendered as-is by VS Code (no currentColor theming),
+		// so we ship hardcoded brand-color SVG variants tuned per theme for crisp
+		// rendering at any DPI.
+		panel.iconPath = {
+			light: vscode.Uri.file(path.join(context.extensionPath, 'resources', 'icon-light.svg')),
+			dark: vscode.Uri.file(path.join(context.extensionPath, 'resources', 'icon-dark.svg'))
+		};
 
 		PromptPocketPanel.currentPanel = new PromptPocketPanel(panel, storage, context);
 	}

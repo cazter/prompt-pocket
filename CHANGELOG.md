@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-21
+
+### Added
+- Drag-and-drop files or folders anywhere in the prompt modal to insert them as `@reference` paths, with a full-modal drop overlay highlighting the active drop target.
+- Unsaved-changes confirm dialog (Save / Discard / Cancel) when closing prompt or group modals with pending edits.
+- Inline hint under the prompt content label explaining the `Shift`-drag requirement for VS Code Explorer drops.
+
+### Changed
+- Default prompt and group modal size is now `80vw` x `80vh` (still resizable within sensible min/max bounds).
+- Drop handling now parses `text/uri-list` per spec (`\r?\n` line splitting, comment filtering) and falls back to `dataTransfer.files` for OS-level drops.
+- Rewrote `README.md` for marketplace readers: added Getting Started, Using Prompt Pocket, File References, Keyboard Shortcuts, Settings, Import / Export, and Privacy sections; removed source-install and developer build instructions.
+
+### Fixed
+- `Cmd/Ctrl+N` no longer pops the New Prompt modal when refocusing the Prompt Pocket tab; the shortcut is now gated on the webview actually having focus (`document.hasFocus()`).
+- Modal close buttons no longer accidentally bypass the unsaved-changes dialog by passing the click event as the `force` argument.
+
 ## [0.1.5] - 2026-02-26
 
 ### Changed
@@ -71,3 +87,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.0.1]: https://github.com/cazter/prompt-pocket/releases/tag/v0.0.1
 [0.1.4]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.4
 [0.1.5]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.5
+[0.1.6]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.6

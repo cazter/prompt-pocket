@@ -10,76 +10,69 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 
 ## Features
 
-- **Hierarchical Organization**: Organize prompts into groups and subgroups
-- **One-Click Copy**: Click any prompt to copy to clipboard
-- **File Mentions**: Type `@` to attach files from your workspace
-- **Quick Search**: Fast search across all prompts
-- **Import/Export**: Backup and share prompt libraries as JSON
-- **Webview Editor Panel**: Search-first interface that opens as an editor tab (`Cmd+Shift+P` `Cmd+O`)
-- **100% Local**: No telemetry, no accounts, no cloud syncing
+- **Hierarchical organization**: group prompts and nest one level of subgroups
+- **One-click copy**: click any prompt in the tree or panel to copy it to the clipboard
+- **Editor panel**: search-first webview that opens as a full editor tab
+- **Sidebar tree view**: traditional hierarchical navigation in the activity bar
+- **File mentions**: type `@` in the prompt editor to attach workspace files; drag-and-drop also works (hold `Shift` when dragging from the Explorer)
+- **Markdown preview**: toggle a rendered preview while editing a prompt
+- **Quick search**: filter all prompts as you type, with arrow-key navigation
+- **Adjustable density**: SM / MD / LG / XL sizing for the groups sidebar
+- **Import / export**: back up or share prompt libraries as JSON
+- **100% local**: no telemetry, no accounts, no cloud syncing
 
-## Recent Changes (v0.1.4)
+## Getting Started
 
-- Fixed modal resize behavior so the resize cursor no longer gets stuck.
-- Added a prompt modal option to hide referenced items (`@files` / domains).
-- Added `promptPocket.enableFileReferences` setting to disable file references and hide related UI.
-- Improved export to default to creating a new timestamped JSON file.
-- Copy now removes hard line breaks for cleaner pasting.
-- Added an `X` button in search to clear filters quickly.
+After installing from the Marketplace:
+
+1. Click the Prompt Pocket icon in the Activity Bar to open the sidebar tree.
+2. Press `Cmd+Alt+P` (`Ctrl+Alt+P` on Windows / Linux) to open the editor panel in a tab.
+3. Click **Add** to create your first prompt, or **+** in the Groups sidebar to create a group first.
+4. Click any prompt to copy it to your clipboard.
 
 ![File Mention Autocomplete](media/file_mention_autocomplete.png)
 
-## Installation
+## Using Prompt Pocket
 
-### From Source (Cursor/VS Code)
+There are three ways to reach your prompts:
 
-```bash
-cd prompt-pocket
-./install.sh
-```
+- **Sidebar tree** — Activity Bar → Prompt Pocket. Right-click a group or prompt for create / rename / duplicate / delete actions.
+- **Editor panel** — `Cmd+Alt+P` / `Ctrl+Alt+P`. Search-first interface with arrow-key navigation, `Enter` to copy, and `Cmd/Ctrl+N` to start a new prompt while the panel is focused.
+- **Command Palette** — `Cmd+Alt+C` / `Ctrl+Alt+C` runs **Copy Prompt from Prompt Pocket**, a quick-pick of every prompt across every group. **Search Prompts** is also available from the palette.
 
-The script installs dependencies, compiles TypeScript, packages the extension, and installs to Cursor/VS Code.
+### Editing prompts
 
-### Manual Installation
+Open the editor panel and click **Add** (or right-click a prompt in the tree → **Edit**). The modal supports markdown preview, live `@file` autocomplete, attached-file chips, and resizable bounds. Closing the modal with unsaved changes prompts you to **Save**, **Discard**, or **Cancel**.
 
-1. Build: `pnpm install && pnpm run compile && pnpm run package`
-2. Open VS Code/Cursor → `Cmd+Shift+P` → "Extensions: Install from VSIX"
-3. Select the `.vsix` file
+### File references
 
-## Usage
+With `promptPocket.enableFileReferences` on (the default), typing `@` inside a prompt opens an autocomplete of workspace files. References are stored as plain `@path/to/file` text inside the prompt, so they travel cleanly through copy / export / import. Folders work too — drop a folder and Prompt Pocket inserts `@path/to/folder`.
 
-### Quick Start
+**Drag-and-drop tip:** VS Code intentionally hands Explorer drags to the active editor by default. To drop files (or folders) into the Prompt Pocket modal, **start dragging from the Explorer, then hold `Shift`** before releasing over the modal. The modal will highlight to confirm it accepted the drop. Files dragged in from your OS file manager (Finder / Explorer / Files) work without holding `Shift`.
 
-1. Click the 📝 icon in the Activity Bar
-2. Open the editor panel: `Cmd+Shift+P` → `Cmd+O`
-3. Create a prompt: Click `+` button or right-click a group → "New Prompt"
-4. Copy a prompt: Click any prompt in the tree or panel
+## Keyboard Shortcuts
 
-### Creating Prompts
+- `Cmd+Alt+P` / `Ctrl+Alt+P` — Open the Prompt Pocket editor panel
+- `Cmd+Alt+C` / `Ctrl+Alt+C` — Copy a prompt from the Command Palette
+- `Cmd+N` / `Ctrl+N` — New prompt (only when the editor panel is focused)
+- `Cmd+F` / `Ctrl+F` — Focus the search box (when the panel is focused)
+- `↑` / `↓` — Move between prompts in the panel
+- `Enter` — Copy the highlighted prompt
+- `Esc` — Clear the search filter (or close an open modal / dialog)
 
-- **New Group**: Click `+` in toolbar
-- **New Prompt**: Right-click group → "New Prompt"
-- **Edit Content**: Right-click prompt → "Edit Content"
-- **Attach Files**: Type `@` in the content editor to mention workspace files
+## Settings
 
-### Managing Prompts
+All settings live under `promptPocket.*` in VS Code Settings (`Cmd/Ctrl+,`).
 
-- **Search**: Type in the search box to filter prompts
-- **Duplicate**: Right-click → "Duplicate"
-- **Import/Export**: Use toolbar icons to backup or share prompt libraries
-- **Delete**: Right-click → "Delete"
+- `promptPocket.showCopyNotification` *(boolean, default `true`)* — show a toast when a prompt is copied to the clipboard.
+- `promptPocket.defaultView` *(`"panel"` | `"sidebar"`, default `"panel"`)* — preferred surface when opening Prompt Pocket.
+- `promptPocket.confirmDelete` *(boolean, default `true`)* — ask for confirmation before deleting a prompt or group.
+- `promptPocket.modalClickOutsideToClose` *(boolean, default `true`)* — allow closing the prompt modal by clicking outside it. Unsaved changes still trigger the confirm dialog.
+- `promptPocket.enableFileReferences` *(boolean, default `true`)* — enable `@` file mentions and drag-and-drop file linking inside the prompt editor.
 
-## Configuration
+## Import / Export
 
-Prompt Pocket works out of the box with zero configuration. All data is stored locally in VS Code's GlobalState.
-
-![Configuration Options](media/config_options.png)
-
-### Available Settings
-
-Currently, all features are enabled by default. Configuration options may be added in future releases.
-
-### Data Format
+Use the Import and Export buttons in the editor panel toolbar (or the same commands from the sidebar's overflow menu) to back up or share prompt libraries. Exports are timestamped JSON files; imports can either **Merge** with your existing prompts or **Replace** them entirely.
 
 Exported JSON structure:
 
@@ -102,43 +95,13 @@ Exported JSON structure:
 }
 ```
 
-## Development
+## Privacy
 
-### Prerequisites
+All prompts are stored locally in VS Code's Global State on your machine. Prompt Pocket has no telemetry, no accounts, and makes no network calls.
 
-- Node.js 20.x or higher
-- pnpm 9.x or higher
-- VS Code 1.85.0 or higher
+## Issues & Contributing
 
-### Build Commands
-
-```bash
-pnpm install          # Install dependencies
-pnpm run compile      # Compile TypeScript
-pnpm run watch        # Watch mode for development
-pnpm run lint         # Lint code
-pnpm run test         # Run tests
-pnpm run package      # Create .vsix package
-```
-
-### Development Workflow
-
-1. Edit TypeScript files in `src/`
-2. Run `pnpm run watch` or compile manually
-3. Press `F5` to launch Extension Development Host
-4. Set breakpoints and debug as needed
-
-### Project Structure
-
-```
-src/
-├── extension.ts         # Entry point & command handlers
-├── webviewPanel.ts      # Webview editor panel
-├── storage.ts           # Data persistence (GlobalState)
-├── treeDataProvider.ts  # TreeView implementation
-├── types.ts             # Type definitions
-└── icons.ts             # Icon management
-```
+Bug reports, feature requests, and pull requests are welcome at [github.com/cazter/prompt-pocket](https://github.com/cazter/prompt-pocket).
 
 ## License
 

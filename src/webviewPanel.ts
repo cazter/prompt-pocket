@@ -1159,11 +1159,12 @@ export class PromptPocketPanel {
 			background: var(--vscode-editor-background);
 			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
 			border-radius: var(--radius-md);
-			width: 600px;
+			width: 80vw;
+			height: 80vh;
 			max-width: 95vw;
+			max-height: 90vh;
 			min-width: 400px;
 			min-height: 300px;
-			max-height: 90vh;
 			display: flex;
 			flex-direction: column;
 			box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -1185,6 +1186,28 @@ export class PromptPocketPanel {
 
 		.modal-resizer:hover {
 			opacity: 0.75;
+		}
+
+		/* Unsaved-changes confirm dialog floats above the parent modal
+		   and uses an auto-sized footprint instead of inheriting 80vw/80vh. */
+		.confirm-overlay {
+			z-index: 200;
+		}
+
+		.confirm-modal {
+			width: 420px;
+			height: auto;
+			min-width: 320px;
+			min-height: 0;
+		}
+
+		.confirm-modal .modal-body {
+			flex: 0 0 auto;
+		}
+
+		.confirm-modal .modal-body p {
+			margin: 0;
+			line-height: 1.5;
 		}
 
 		.modal-header {
@@ -1256,6 +1279,44 @@ export class PromptPocketPanel {
 		.form-textarea.drag-over {
 			border-color: var(--vscode-focusBorder);
 			box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+		}
+
+		/* Drop overlay shown across the entire prompt modal while a file
+		   drag is active. Sits above the modal body, ignores pointer events
+		   so the underlying drop target still receives the event. */
+		.modal-drop-overlay {
+			position: absolute;
+			inset: 0;
+			border: 2px dashed var(--vscode-focusBorder);
+			border-radius: var(--radius-md);
+			background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: var(--vscode-foreground);
+			font-weight: 500;
+			pointer-events: none;
+			opacity: 0;
+			transition: opacity var(--transition);
+			z-index: 10;
+		}
+
+		.modal-drop-overlay.visible {
+			opacity: 1;
+		}
+
+		.modal-drop-overlay-text {
+			background: var(--vscode-editor-background);
+			padding: var(--spacing-sm) var(--spacing-lg);
+			border-radius: var(--radius-md);
+			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+		}
+
+		.modal-drop-overlay-hint {
+			font-weight: normal;
+			opacity: 0.7;
+			margin-top: 4px;
+			font-size: 0.85em;
 		}
 
 		.textarea-wrapper {
@@ -1624,7 +1685,7 @@ export class PromptPocketPanel {
 					<input type="text" class="form-input" id="promptTitle" placeholder="Enter prompt title">
 				</div>
 				<div class="form-group" style="flex: 1; display: flex; flex-direction: column;">
-					<label class="form-label" for="promptContent">Content <span id="mentionHint" style="opacity: 0.5; font-weight: normal; font-size: 0.85em;">Type @ to mention files</span></label>
+					<label class="form-label" for="promptContent">Content <span id="mentionHint" style="opacity: 0.5; font-weight: normal; font-size: 0.85em;">Type @ to mention files, or drag files in (hold &#8679; Shift when dragging from the Explorer)</span></label>
 					<div class="textarea-wrapper">
 						<textarea class="form-input form-textarea" id="promptContent" placeholder="Enter prompt content..."></textarea>
 						<div class="file-mention-menu" id="fileMentionMenu"></div>
@@ -1643,6 +1704,12 @@ export class PromptPocketPanel {
 				<button class="btn btn-primary" id="promptModalSave">Save</button>
 			</div>
 			<div class="modal-resizer" id="promptModalResizer" title="Resize"></div>
+			<div class="modal-drop-overlay" id="promptModalDropOverlay" aria-hidden="true">
+				<div class="modal-drop-overlay-text">
+					Drop to insert as @reference
+					<div class="modal-drop-overlay-hint">Hold &#8679; Shift when dragging from the Explorer</div>
+				</div>
+			</div>
 		</div>
 	</div>
 
@@ -1680,6 +1747,23 @@ export class PromptPocketPanel {
 				<button class="btn btn-primary" id="groupModalSave">Save</button>
 			</div>
 			<div class="modal-resizer" id="groupModalResizer" title="Resize"></div>
+		</div>
+	</div>
+
+	<!-- Unsaved Changes Confirm Dialog -->
+	<div class="modal-overlay confirm-overlay" id="confirmDialog">
+		<div class="modal confirm-modal">
+			<div class="modal-header">
+				<span class="modal-title" id="confirmDialogTitle">Unsaved changes</span>
+			</div>
+			<div class="modal-body">
+				<p id="confirmDialogMessage">You have unsaved changes. Save before closing?</p>
+			</div>
+			<div class="modal-footer">
+				<button class="btn btn-secondary" id="confirmDialogCancel">Cancel</button>
+				<button class="btn btn-secondary" id="confirmDialogDiscard">Discard</button>
+				<button class="btn btn-primary" id="confirmDialogSave">Save</button>
+			</div>
 		</div>
 	</div>
 
@@ -1792,7 +1876,14 @@ export class PromptPocketPanel {
 			promptModalContainer: document.getElementById('promptModalContainer'),
 			groupModalContainer: document.getElementById('groupModalContainer'),
 			promptModalResizer: document.getElementById('promptModalResizer'),
-			groupModalResizer: document.getElementById('groupModalResizer')
+			groupModalResizer: document.getElementById('groupModalResizer'),
+			promptModalDropOverlay: document.getElementById('promptModalDropOverlay'),
+			confirmDialog: document.getElementById('confirmDialog'),
+			confirmDialogTitle: document.getElementById('confirmDialogTitle'),
+			confirmDialogMessage: document.getElementById('confirmDialogMessage'),
+			confirmDialogSave: document.getElementById('confirmDialogSave'),
+			confirmDialogDiscard: document.getElementById('confirmDialogDiscard'),
+			confirmDialogCancel: document.getElementById('confirmDialogCancel')
 		};
 
 		const sidebarMinWidth = 180;
@@ -2357,10 +2448,104 @@ export class PromptPocketPanel {
 				   elements.promptGroup.value !== promptModalInitialState.groupId;
 		}
 
-		function closePromptModal(force = false) {
+		// Persist the prompt modal's current values. Returns true if the save
+		// was accepted (or scheduled via pendingPrompt), false on validation
+		// failure so callers can keep the modal open for the user to fix.
+		function trySavePromptModal() {
+			const title = elements.promptTitle.value.trim();
+			const content = elements.promptContent.value;
+			const selectedGroupId = elements.promptGroup.value;
+
+			if (!title) {
+				elements.promptTitle.focus();
+				return false;
+			}
+
+			if (!selectedGroupId) {
+				// Should not happen if groups exist, but handle it
+				vscode.postMessage({ type: 'createGroup', name: 'My Prompts' });
+				state.pendingPrompt = { title, content };
+				return true;
+			}
+
+			if (state.editingPrompt) {
+				if (selectedGroupId !== state.editingPromptGroupId) {
+					vscode.postMessage({
+						type: 'movePrompt',
+						promptId: state.editingPrompt.id,
+						fromGroupId: state.editingPromptGroupId,
+						toGroupId: selectedGroupId
+					});
+				}
+
+				vscode.postMessage({
+					type: 'updatePrompt',
+					groupId: selectedGroupId,
+					promptId: state.editingPrompt.id,
+					title,
+					content
+				});
+			} else {
+				vscode.postMessage({ type: 'createPrompt', groupId: selectedGroupId, title, content });
+			}
+			return true;
+		}
+
+		// Show the shared unsaved-changes dialog. Resolves to one of
+		// 'save' | 'discard' | 'cancel'. Listeners are added for the duration
+		// of the dialog and torn down on resolve. Escape -> cancel, Enter -> save.
+		function showUnsavedChangesDialog() {
+			return new Promise((resolve) => {
+				const dialog = elements.confirmDialog;
+				const saveBtn = elements.confirmDialogSave;
+				const discardBtn = elements.confirmDialogDiscard;
+				const cancelBtn = elements.confirmDialogCancel;
+
+				const cleanup = (result) => {
+					dialog.classList.remove('visible');
+					saveBtn.removeEventListener('click', onSave);
+					discardBtn.removeEventListener('click', onDiscard);
+					cancelBtn.removeEventListener('click', onCancel);
+					document.removeEventListener('keydown', onKey, true);
+					resolve(result);
+				};
+
+				const onSave = () => cleanup('save');
+				const onDiscard = () => cleanup('discard');
+				const onCancel = () => cleanup('cancel');
+				const onKey = (e) => {
+					if (e.key === 'Escape') {
+						e.stopPropagation();
+						e.preventDefault();
+						cleanup('cancel');
+					} else if (e.key === 'Enter') {
+						e.stopPropagation();
+						e.preventDefault();
+						cleanup('save');
+					}
+				};
+
+				saveBtn.addEventListener('click', onSave);
+				discardBtn.addEventListener('click', onDiscard);
+				cancelBtn.addEventListener('click', onCancel);
+				// Capture-phase keydown so the parent modal's Escape handler
+				// doesn't also fire while the dialog is open.
+				document.addEventListener('keydown', onKey, true);
+
+				dialog.classList.add('visible');
+				saveBtn.focus();
+			});
+		}
+
+		async function closePromptModal(force = false) {
 			if (!force && hasPromptModalChanges()) {
-				const choice = confirm('You have unsaved changes. Discard changes?');
-				if (!choice) return;
+				const choice = await showUnsavedChangesDialog();
+				if (choice === 'cancel') return;
+				if (choice === 'save') {
+					const saved = trySavePromptModal();
+					if (!saved) return; // validation failed - keep modal open
+				}
+				// 'discard' falls through to dismissal
 			}
 			elements.promptModal.classList.remove('visible');
 			state.editingPrompt = null;
@@ -2403,10 +2588,39 @@ export class PromptPocketPanel {
 				   getSelectedGroupColor() !== groupModalInitialState.color;
 		}
 
-		function closeGroupModal(force = false) {
+		// Persist the group modal's current values. Returns true on success,
+		// false on validation failure so callers can keep the modal open.
+		function tryGroupSaveModal() {
+			const name = elements.groupName.value.trim();
+			if (!name) {
+				elements.groupName.focus();
+				return false;
+			}
+
+			const selectedColor = elements.colorPicker.querySelector('.color-option.selected');
+			const color = selectedColor?.dataset.color || null;
+
+			if (state.editingGroup) {
+				vscode.postMessage({
+					type: 'updateGroup',
+					groupId: state.editingGroup.id,
+					name,
+					color
+				});
+			} else {
+				vscode.postMessage({ type: 'createGroup', name, color });
+			}
+			return true;
+		}
+
+		async function closeGroupModal(force = false) {
 			if (!force && hasGroupModalChanges()) {
-				const choice = confirm('You have unsaved changes. Discard changes?');
-				if (!choice) return;
+				const choice = await showUnsavedChangesDialog();
+				if (choice === 'cancel') return;
+				if (choice === 'save') {
+					const saved = tryGroupSaveModal();
+					if (!saved) return;
+				}
 			}
 			elements.groupModal.classList.remove('visible');
 			state.editingGroup = null;
@@ -2482,8 +2696,8 @@ export class PromptPocketPanel {
 		elements.addGroupBtn.addEventListener('click', () => openGroupModal());
 
 		// Prompt modal events
-		elements.promptModalClose.addEventListener('click', closePromptModal);
-		elements.promptModalCancel.addEventListener('click', closePromptModal);
+		elements.promptModalClose.addEventListener('click', () => { closePromptModal(); });
+		elements.promptModalCancel.addEventListener('click', () => { closePromptModal(); });
 
 		elements.promptModalPreview.addEventListener('click', () => {
 			promptModalPreviewMode = !promptModalPreviewMode;
@@ -2554,32 +2768,83 @@ export class PromptPocketPanel {
 				}, 150);
 			});
 
-			// Drag and drop file references
-			elements.promptContent.addEventListener('dragover', (e) => {
+		}
+
+		// Drag and drop file references — bound to the entire prompt modal
+		// container so users can drop anywhere in the modal, not just the
+		// textarea. Uses a counter to handle dragenter/dragleave firing for
+		// nested children, and falls back to dataTransfer.files when the OS
+		// (or VS Code) does not provide a text/uri-list payload.
+		if (elements.promptModalContainer && elements.promptModalDropOverlay) {
+			let dragDepth = 0;
+			const overlay = elements.promptModalDropOverlay;
+			const container = elements.promptModalContainer;
+
+			const isFileDrag = (e) => {
+				const types = e.dataTransfer && e.dataTransfer.types;
+				if (!types) return false;
+				return Array.from(types).some(t => t === 'text/uri-list' || t === 'Files');
+			};
+
+			const showOverlay = () => overlay.classList.add('visible');
+			const hideOverlay = () => {
+				dragDepth = 0;
+				overlay.classList.remove('visible');
+			};
+
+			container.addEventListener('dragenter', (e) => {
 				if (!state.config.enableFileReferences) return;
+				if (!isFileDrag(e)) return;
+				e.preventDefault();
+				dragDepth++;
+				showOverlay();
+			});
+
+			container.addEventListener('dragover', (e) => {
+				if (!state.config.enableFileReferences) return;
+				if (!isFileDrag(e)) return;
 				e.preventDefault();
 				e.dataTransfer.dropEffect = 'copy';
-				elements.promptContent.classList.add('drag-over');
 			});
 
-			elements.promptContent.addEventListener('dragleave', (e) => {
+			container.addEventListener('dragleave', (e) => {
 				if (!state.config.enableFileReferences) return;
-				e.preventDefault();
-				elements.promptContent.classList.remove('drag-over');
+				dragDepth = Math.max(0, dragDepth - 1);
+				if (dragDepth === 0) {
+					overlay.classList.remove('visible');
+				}
 			});
 
-			elements.promptContent.addEventListener('drop', (e) => {
+			container.addEventListener('drop', (e) => {
 				if (!state.config.enableFileReferences) return;
 				e.preventDefault();
-				elements.promptContent.classList.remove('drag-over');
+				hideOverlay();
 
-				// Get URIs from drag data
+				const uris = [];
+
 				const uriList = e.dataTransfer.getData('text/uri-list');
 				if (uriList) {
-					const uris = uriList.split('\\n').filter(u => u && !u.startsWith('#'));
-					if (uris.length > 0) {
-						vscode.postMessage({ type: 'resolveUris', uris });
-					}
+					// text/uri-list spec: lines separated by CRLF; '#' lines are comments
+					uriList.split(/\\r?\\n/).forEach(line => {
+						const trimmed = line.trim();
+						if (trimmed && !trimmed.startsWith('#')) uris.push(trimmed);
+					});
+				}
+
+				// Fallback: some drag sources (notably OS-level drops in Electron)
+				// only expose dataTransfer.files. In Electron, File objects carry
+				// an absolute filesystem 'path' that we can convert to a file:// URI.
+				if (uris.length === 0 && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+					Array.from(e.dataTransfer.files).forEach(file => {
+						const fsPath = file.path;
+						if (fsPath) {
+							uris.push('file://' + encodeURI(fsPath.replace(/\\\\/g, '/')));
+						}
+					});
+				}
+
+				if (uris.length > 0) {
+					vscode.postMessage({ type: 'resolveUris', uris });
 				}
 			});
 		}
@@ -2618,45 +2883,9 @@ export class PromptPocketPanel {
 		}
 
 		elements.promptModalSave.addEventListener('click', () => {
-			const title = elements.promptTitle.value.trim();
-			const content = elements.promptContent.value;
-			const selectedGroupId = elements.promptGroup.value;
-
-			if (!title) {
-				elements.promptTitle.focus();
-				return;
-			}
-
-			if (!selectedGroupId) {
-				// Should not happen if groups exist, but handle it
-				vscode.postMessage({ type: 'createGroup', name: 'My Prompts' });
-				state.pendingPrompt = { title, content };
+			if (trySavePromptModal()) {
 				closePromptModal(true);
-				return;
 			}
-
-			if (state.editingPrompt) {
-				// Check if group changed
-				if (selectedGroupId !== state.editingPromptGroupId) {
-					vscode.postMessage({
-						type: 'movePrompt',
-						promptId: state.editingPrompt.id,
-						fromGroupId: state.editingPromptGroupId,
-						toGroupId: selectedGroupId
-					});
-				}
-
-				vscode.postMessage({
-					type: 'updatePrompt',
-					groupId: selectedGroupId, // Use new group ID
-					promptId: state.editingPrompt.id,
-					title,
-					content
-				});
-			} else {
-				vscode.postMessage({ type: 'createPrompt', groupId: selectedGroupId, title, content });
-			}
-			closePromptModal(true);
 		});
 
 		elements.promptModalDelete.addEventListener('click', () => {
@@ -2673,8 +2902,8 @@ export class PromptPocketPanel {
 		});
 
 		// Group modal events
-		elements.groupModalClose.addEventListener('click', closeGroupModal);
-		elements.groupModalCancel.addEventListener('click', closeGroupModal);
+		elements.groupModalClose.addEventListener('click', () => { closeGroupModal(); });
+		elements.groupModalCancel.addEventListener('click', () => { closeGroupModal(); });
 
 		elements.colorPicker.addEventListener('click', (e) => {
 			const colorOption = e.target.closest('.color-option');
@@ -2685,26 +2914,9 @@ export class PromptPocketPanel {
 		});
 
 		elements.groupModalSave.addEventListener('click', () => {
-			const name = elements.groupName.value.trim();
-			if (!name) {
-				elements.groupName.focus();
-				return;
+			if (tryGroupSaveModal()) {
+				closeGroupModal(true);
 			}
-
-			const selectedColor = elements.colorPicker.querySelector('.color-option.selected');
-			const color = selectedColor?.dataset.color || null;
-
-			if (state.editingGroup) {
-				vscode.postMessage({
-					type: 'updateGroup',
-					groupId: state.editingGroup.id,
-					name,
-					color
-				});
-			} else {
-				vscode.postMessage({ type: 'createGroup', name, color });
-			}
-			closeGroupModal(true);
 		});
 
 		elements.groupModalDelete.addEventListener('click', () => {
@@ -3264,6 +3476,15 @@ export class PromptPocketPanel {
 
 				case 'n':
 					if (e.ctrlKey || e.metaKey) {
+						// Only intercept Cmd/Ctrl+N when this webview is actually
+						// the focused surface. Without this guard the shortcut can
+						// fire on a hidden / background panel (because
+						// retainContextWhenHidden keeps the listener alive) and
+						// the modal would then "appear" the next time the user
+						// brings the tab forward.
+						if (!document.hasFocus()) {
+							return;
+						}
 						e.preventDefault();
 						openPromptModal();
 					}

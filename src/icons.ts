@@ -3,6 +3,7 @@
  * Using stroke style matching Hugeicons design language
  */
 
+// eslint-disable-next-line @typescript-eslint/naming-convention -- intentional PascalCase: used as a namespace-like icon registry across the codebase
 export const Icons = {
 	search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11.5" cy="11.5" r="9.5"/><path d="M18.5 18.5L22 22"/></svg>`,
 

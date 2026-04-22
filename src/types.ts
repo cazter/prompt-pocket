@@ -2,6 +2,7 @@ export interface PromptItem {
 	id: string;
 	title: string;
 	content: string;
+	pinned?: boolean;
 }
 
 /** Available group colors */
@@ -69,9 +70,16 @@ export function validatePromptData(data: unknown): data is PromptData {
 				return false;
 			}
 			const prompt = p as Record<string, unknown>;
-			return typeof prompt.id === 'string' 
-				&& typeof prompt.title === 'string' 
-				&& typeof prompt.content === 'string';
+			if (typeof prompt.id !== 'string'
+				|| typeof prompt.title !== 'string'
+				|| typeof prompt.content !== 'string') {
+				return false;
+			}
+			// `pinned` is optional; reject only if present and not boolean.
+			if (prompt.pinned !== undefined && typeof prompt.pinned !== 'boolean') {
+				return false;
+			}
+			return true;
 		});
 	};
 

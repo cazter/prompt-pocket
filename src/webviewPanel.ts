@@ -34,6 +34,7 @@ type WebviewMessage =
 	| { type: 'createPrompt'; groupId: string; title: string; content: string }
 	| { type: 'updatePrompt'; groupId: string; promptId: string; title?: string; content?: string }
 	| { type: 'deletePrompt'; groupId: string; promptId: string }
+	| { type: 'togglePinned'; promptId: string }
 	| { type: 'createGroup'; name: string; color?: GroupColor; parentId?: string }
 	| { type: 'updateGroup'; groupId: string; name?: string; color?: GroupColor }
 	| { type: 'deleteGroup'; groupId: string }
@@ -312,6 +313,12 @@ export class PromptPocketPanel {
 			case 'deletePrompt': {
 				await this.storage.deletePrompt(message.groupId, message.promptId);
 				this.postMessage({ type: 'promptDeleted', promptId: message.promptId, groupId: message.groupId });
+				this.refreshState();
+				break;
+			}
+
+			case 'togglePinned': {
+				await this.storage.togglePinned(message.promptId);
 				this.refreshState();
 				break;
 			}
@@ -1017,6 +1024,72 @@ export class PromptPocketPanel {
 		.prompt-item:hover .prompt-item-actions,
 		.prompt-item.selected .prompt-item-actions {
 			opacity: 1;
+		}
+
+		/* Pinned prompts: keep the pin button visible at all times so the
+		   user can quickly unpin without hovering, while still hiding the
+		   sibling edit/delete buttons until hover. */
+		.prompt-item.is-pinned .prompt-item-actions {
+			opacity: 1;
+		}
+		.prompt-item.is-pinned .prompt-item-actions .edit-btn,
+		.prompt-item.is-pinned .prompt-item-actions .delete-btn {
+			opacity: 0;
+			transition: opacity var(--transition);
+		}
+		.prompt-item.is-pinned:hover .prompt-item-actions .edit-btn,
+		.prompt-item.is-pinned:hover .prompt-item-actions .delete-btn,
+		.prompt-item.is-pinned.selected .prompt-item-actions .edit-btn,
+		.prompt-item.is-pinned.selected .prompt-item-actions .delete-btn {
+			opacity: 1;
+		}
+		.prompt-item.is-pinned .pin-btn {
+			color: var(--vscode-textLink-foreground, var(--vscode-button-background));
+		}
+
+		.prompt-title-pin-glyph {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 12px;
+			height: 12px;
+			margin-right: 2px;
+			opacity: 0.55;
+			color: var(--vscode-descriptionForeground);
+			flex-shrink: 0;
+		}
+		.prompt-title-pin-glyph svg {
+			width: 12px;
+			height: 12px;
+		}
+
+		.pinned-section-header {
+			display: flex;
+			align-items: center;
+			gap: var(--spacing-xs);
+			padding: var(--spacing-md) var(--spacing-md) var(--spacing-xs);
+			font-size: 0.7em;
+			font-weight: 600;
+			letter-spacing: 0.08em;
+			text-transform: uppercase;
+			color: var(--vscode-descriptionForeground);
+			user-select: none;
+		}
+		.pinned-section-count {
+			opacity: 0.7;
+			font-weight: 500;
+		}
+		.pinned-section-count::before {
+			content: "·";
+			margin-right: 4px;
+		}
+
+		.pinned-section {
+			display: flex;
+			flex-direction: column;
+			border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-editorGroup-border));
+			padding-bottom: var(--spacing-xs);
+			margin-bottom: var(--spacing-xs);
 		}
 
 		/* Always-visible copy button */
@@ -2022,12 +2095,18 @@ export class PromptPocketPanel {
 			return result;
 		}
 
-		// Get filtered prompts
+		// Get filtered prompts split into pinned and filtered buckets.
+		// - pinned: every prompt with \`pinned === true\`, regardless of the
+		//   active group selection or search query. Order follows depth-first
+		//   storage order so the section is stable across renders.
+		// - filtered: the existing group/search filter, with any pinned prompt
+		//   excluded so the same item never appears in both buckets.
 		function getFilteredPrompts() {
 			const { groups } = state.data;
 			const { selectedGroupId, searchQuery } = state.uiState;
 			const query = searchQuery.toLowerCase();
-			const results = [];
+			const pinned = [];
+			const filtered = [];
 
 			function collectPrompts(groupList, path = [], parentColor = null) {
 				for (const group of groupList) {
@@ -2037,20 +2116,29 @@ export class PromptPocketPanel {
 						group.id === selectedGroupId ||
 						isDescendantOf(group.id, selectedGroupId);
 
-					if (inSelectedGroup) {
-						for (const prompt of group.prompts) {
-							const matchesSearch = !query ||
-								prompt.title.toLowerCase().includes(query) ||
-								prompt.content.toLowerCase().includes(query);
+					for (const prompt of group.prompts) {
+						const entry = {
+							prompt,
+							group,
+							path: currentPath,
+							color: groupColor
+						};
 
-							if (matchesSearch) {
-								results.push({
-									prompt,
-									group,
-									path: currentPath,
-									color: groupColor
-								});
-							}
+						if (prompt.pinned === true) {
+							pinned.push(entry);
+							continue;
+						}
+
+						if (!inSelectedGroup) {
+							continue;
+						}
+
+						const matchesSearch = !query ||
+							prompt.title.toLowerCase().includes(query) ||
+							prompt.content.toLowerCase().includes(query);
+
+						if (matchesSearch) {
+							filtered.push(entry);
 						}
 					}
 					collectPrompts(group.children, currentPath, groupColor);
@@ -2058,7 +2146,16 @@ export class PromptPocketPanel {
 			}
 
 			collectPrompts(groups);
-			return results;
+			return { pinned, filtered };
+		}
+
+		// Flat, render-order list of prompts currently visible in the UI.
+		// Used by keyboard navigation, click handlers, and lookups so they
+		// can continue to address rows by id or by visible index without
+		// caring which bucket the row belongs to.
+		function getVisiblePrompts() {
+			const { pinned, filtered } = getFilteredPrompts();
+			return [...pinned, ...filtered];
 		}
 
 		function isDescendantOf(groupId, parentId) {
@@ -2199,34 +2296,51 @@ export class PromptPocketPanel {
 		}
 
 		function renderPromptList() {
-			const prompts = getFilteredPrompts();
+			const { pinned, filtered } = getFilteredPrompts();
 			const previewLines = getPreviewLines();
+			const visibleCount = pinned.length + filtered.length;
 
-			if (prompts.length === 0) {
+			if (visibleCount === 0) {
 				elements.emptyState.style.display = 'flex';
-				const items = elements.promptList.querySelectorAll('.prompt-item');
+				const items = elements.promptList.querySelectorAll('.prompt-item, .pinned-section, .pinned-section-header');
 				items.forEach(item => item.remove());
 				return;
 			}
 
 			elements.emptyState.style.display = 'none';
 
-			let html = '';
-			for (let i = 0; i < prompts.length; i++) {
-				const { prompt, group, path, color } = prompts[i];
+			// Index across both buckets so keyboard navigation, click selection,
+			// and the existing index-based logic see one continuous list. Pinned
+			// rows are first and therefore claim the lowest indices.
+			let visibleIndex = 0;
+			const renderRow = (entry, isPinned) => {
+				const { prompt, group, path, color } = entry;
 				const lines = prompt.content.split('\\n').slice(0, previewLines);
 				const preview = lines.join('\\n');
-				const isSelected = i === state.selectedPromptIndex;
+				const isSelected = visibleIndex === state.selectedPromptIndex;
 				const colorStyle = color ? \`border-left-color: \${colorMap[color]}\` : '';
-				// Apply highlighting
-				const titleHtml = highlightText(prompt.title, state.uiState.searchQuery);
-				const previewHtml = highlightText(preview, state.uiState.searchQuery);
+				// Pinned rows ignore the active search query for highlighting —
+				// they're always visible regardless of what the user typed, so
+				// highlighting unrelated query matches inside them is noisy.
+				const highlightQuery = isPinned ? '' : state.uiState.searchQuery;
+				const titleHtml = highlightText(prompt.title, highlightQuery);
+				const previewHtml = highlightText(preview, highlightQuery);
+				const pinnedClass = isPinned ? ' is-pinned' : '';
+				const pinIcon = isPinned ? '${Icons.pinFilled}' : '${Icons.pin}';
+				const pinTitle = isPinned ? 'Unpin prompt' : 'Pin prompt';
+				const titleGlyph = isPinned
+					? \`<span class="prompt-title-pin-glyph" aria-hidden="true">${Icons.pinFilled}</span>\`
+					: '';
+				// Pinned rows always show the originating group badge so the
+				// user can tell where a pinned prompt actually lives, even
+				// when a specific group is selected.
+				const showGroupBadge = isPinned || !state.uiState.selectedGroupId;
 
-				html += \`
-					<div class="prompt-item \${isSelected ? 'selected' : ''}"
+				const row = \`
+					<div class="prompt-item\${pinnedClass} \${isSelected ? 'selected' : ''}"
 						 data-prompt-id="\${prompt.id}"
 						 data-group-id="\${group.id}"
-						 data-index="\${i}"
+						 data-index="\${visibleIndex}"
 						 style="\${colorStyle}"
 						 draggable="true"
 						 tabindex="0">
@@ -2235,8 +2349,8 @@ export class PromptPocketPanel {
 						</div>
 						<div class="prompt-item-content">
 							<div class="prompt-title">
-								<span class="prompt-title-text">\${titleHtml}</span>
-								\${!state.uiState.selectedGroupId ? \`<span class="prompt-group-badge" style="\${color ? 'background:' + colorMap[color] : ''}">\${escapeHtml(path[path.length - 1])}</span>\` : ''}
+								\${titleGlyph}<span class="prompt-title-text">\${titleHtml}</span>
+								\${showGroupBadge ? \`<span class="prompt-group-badge" style="\${color ? 'background:' + colorMap[color] : ''}">\${escapeHtml(path[path.length - 1])}</span>\` : ''}
 							</div>
 							<div class="prompt-preview">\${previewHtml}</div>
 						</div>
@@ -2245,6 +2359,9 @@ export class PromptPocketPanel {
 							Copy
 						</button>
 						<div class="prompt-item-actions">
+							<button class="btn btn-ghost btn-icon-sm pin-btn" title="\${pinTitle}" aria-pressed="\${isPinned}">
+								<span class="icon">\${pinIcon}</span>
+							</button>
 							<button class="btn btn-ghost btn-icon-sm edit-btn" title="Edit">
 								<span class="icon">${Icons.edit}</span>
 							</button>
@@ -2254,6 +2371,25 @@ export class PromptPocketPanel {
 						</div>
 					</div>
 				\`;
+				visibleIndex++;
+				return row;
+			};
+
+			let html = '';
+			if (pinned.length > 0) {
+				html += \`
+					<div class="pinned-section-header" role="presentation">
+						<span class="pinned-section-label">Pinned</span>
+						<span class="pinned-section-count">\${pinned.length}</span>
+					</div>
+					<div class="pinned-section">
+						\${pinned.map(entry => renderRow(entry, true)).join('')}
+					</div>
+				\`;
+			}
+
+			for (const entry of filtered) {
+				html += renderRow(entry, false);
 			}
 
 			const emptyState = elements.emptyState;
@@ -3477,6 +3613,7 @@ export class PromptPocketPanel {
 			const copyBtn = e.target.closest('.copy-btn');
 			const editBtn = e.target.closest('.edit-btn');
 			const deleteBtn = e.target.closest('.delete-btn');
+			const pinBtn = e.target.closest('.pin-btn');
 			const promptItem = e.target.closest('.prompt-item');
 
 			if (!promptItem) return;
@@ -3490,9 +3627,15 @@ export class PromptPocketPanel {
 				return;
 			}
 
+			if (pinBtn) {
+				e.stopPropagation();
+				vscode.postMessage({ type: 'togglePinned', promptId });
+				return;
+			}
+
 			if (editBtn) {
 				e.stopPropagation();
-				const prompts = getFilteredPrompts();
+				const prompts = getVisiblePrompts();
 				const item = prompts.find(p => p.prompt.id === promptId);
 				if (item) openPromptModal(item.prompt, groupId);
 				return;
@@ -3518,7 +3661,7 @@ export class PromptPocketPanel {
 			if (promptItem && !e.target.closest('.prompt-item-actions') && !e.target.closest('.drag-handle')) {
 				const promptId = promptItem.dataset.promptId;
 				const groupId = promptItem.dataset.groupId;
-				const prompts = getFilteredPrompts();
+				const prompts = getVisiblePrompts();
 				const item = prompts.find(p => p.prompt.id === promptId);
 				if (item) openPromptModal(item.prompt, groupId);
 			}
@@ -3535,7 +3678,7 @@ export class PromptPocketPanel {
 		elements.promptList.addEventListener('mouseover', (e) => {
 			const promptItem = e.target.closest('.prompt-item');
 			if (promptItem && !e.target.closest('.prompt-item-actions') && !e.target.closest('.drag-handle')) {
-				const prompts = getFilteredPrompts();
+				const prompts = getVisiblePrompts();
 				const item = prompts.find(p => p.prompt.id === promptItem.dataset.promptId);
 				if (item) {
 					showTooltip(e, item.prompt.content);
@@ -3626,13 +3769,13 @@ export class PromptPocketPanel {
 					vscode.postMessage({ type: 'copy', promptId });
 					break;
 				case 'edit': {
-					const prompts = getFilteredPrompts();
+					const prompts = getVisiblePrompts();
 					const item = prompts.find(p => p.prompt.id === promptId);
 					if (item) openPromptModal(item.prompt, groupId);
 					break;
 				}
 				case 'duplicate': {
-					const prompts = getFilteredPrompts();
+					const prompts = getVisiblePrompts();
 					const item = prompts.find(p => p.prompt.id === promptId);
 					if (item) {
 						vscode.postMessage({
@@ -3678,7 +3821,7 @@ export class PromptPocketPanel {
 				return;
 			}
 
-			const prompts = getFilteredPrompts();
+			const prompts = getVisiblePrompts();
 
 			switch (e.key) {
 				case 'ArrowDown':

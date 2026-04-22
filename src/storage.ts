@@ -225,6 +225,50 @@ export class StorageService {
 		}
 	}
 
+	/**
+	 * Flips the `pinned` boolean on a prompt anywhere in the group tree.
+	 * Returns the new pinned value so callers can confirm/log the result.
+	 * Group-agnostic on purpose: pinned state has no relationship to group
+	 * membership, so callers shouldn't have to know which group the prompt
+	 * lives in to toggle it.
+	 */
+	async togglePinned(promptId: string): Promise<boolean> {
+		try {
+			const data = await this.load();
+			const prompt = this.findPromptInTree(data.groups, promptId);
+			if (!prompt) {
+				throw new Error('Prompt not found');
+			}
+			const next = !prompt.pinned;
+			if (next) {
+				prompt.pinned = true;
+			} else {
+				// Drop the field entirely when unpinning to keep stored data
+				// minimal — `pinned` is optional and treated as false when absent.
+				delete prompt.pinned;
+			}
+			await this.save(data);
+			return next;
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to toggle pinned: ${error instanceof Error ? error.message : String(error)}`);
+			throw error;
+		}
+	}
+
+	private findPromptInTree(groups: PromptGroup[], promptId: string): PromptGroup['prompts'][0] | null {
+		for (const group of groups) {
+			const found = group.prompts.find(p => p.id === promptId);
+			if (found) {
+				return found;
+			}
+			const nested = this.findPromptInTree(group.children, promptId);
+			if (nested) {
+				return nested;
+			}
+		}
+		return null;
+	}
+
 	async addSubgroup(parentGroupId: string, subgroup: PromptGroup): Promise<void> {
 		try {
 			const data = await this.load();

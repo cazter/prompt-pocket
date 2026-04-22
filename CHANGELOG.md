@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-04-21
+
+### Added
+- **Pinned prompts.** Any prompt can now be pinned so it always stays at the top of the panel — independent of search filtering and group navigation. Pinned items appear in a quiet `PINNED · n` section above the regular list, separated by a thin divider, and continue to show their originating group badge so it's clear where each one actually lives.
+- **Inline pin toggle.** A new pin button sits in each row's action cluster alongside Edit and Delete. The icon is outlined when unpinned (hover-revealed like the other actions) and filled when pinned (always visible so unpinning is one click away). A small dimmed pin glyph also appears next to the title of pinned rows so they remain identifiable if they ever scroll.
+- New `togglePinned` storage method and webview message handler that flip the boolean on the prompt itself (`PromptItem.pinned`); existing data is forward-compatible because the field is optional and treated as `false` when absent.
+
 ## [0.1.8] - 2026-04-21
 
 ### Fixed

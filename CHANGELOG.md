@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-08
+
+### Added
+- **Copy confirmation feedback.** Copying a prompt from the panel now gives an immediate in-row cue: the Copy button briefly morphs to a checkmark + "Copied", and the row gently flashes before fading back. The feedback fires for all copy paths (the row's Copy button, the right-click context menu, and pressing Enter on a selected row) and self-expires after ~1.3s. Rapid repeat-copies of the same row reset cleanly without leaving a stuck "Copied" label.
+- **Full breadcrumb path on prompts.** Prompt rows now show the complete group ancestry (e.g. `Prompts › Feature Alpha`) instead of just the direct parent group, rendered as a compact chip with a group-colored dot, muted ancestors, and an emphasized leaf. Deep paths collapse the middle (`root › … › leaf`) and the full path is always available via hover tooltip, so the row layout never overflows.
+
+### Changed
+- The webview `copied` message now carries the originating `promptId` so feedback can target the exact row that was copied.
+- The in-row copy feedback shows regardless of the `promptPocket.showCopyNotification` setting; that setting continues to gate only the toast notification.
+- Copy feedback respects `prefers-reduced-motion` (the button still swaps its label, but the scale pop and row flash are suppressed).
+
 ## [0.1.9] - 2026-04-21
 
 ### Added
@@ -120,3 +131,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.6]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.6
 [0.1.7]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.7
 [0.1.8]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.8
+[0.1.9]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.9
+[0.2.0]: https://github.com/cazter/prompt-pocket/releases/tag/v0.2.0

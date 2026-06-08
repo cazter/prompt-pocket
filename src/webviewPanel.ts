@@ -1,8 +1,8 @@
-import * as vscode from 'vscode';
 import * as path from 'path';
-import { StorageService } from './storage';
-import { PromptData, PromptGroup, PromptItem, GroupColor } from './types';
+import * as vscode from 'vscode';
 import { Icons } from './icons';
+import { StorageService } from './storage';
+import { GroupColor, PromptData, PromptGroup, PromptItem } from './types';
 
 const UI_STATE_KEY = 'prompt-pocket-ui-state';
 
@@ -52,7 +52,7 @@ type WebviewMessage =
 
 type ExtensionMessage =
 	| { type: 'state'; data: PromptData; uiState: UIState; config: Config }
-	| { type: 'copied'; title: string; showNotification: boolean }
+	| { type: 'copied'; promptId: string; title: string; showNotification: boolean }
 	| { type: 'error'; message: string }
 	| { type: 'promptCreated'; prompt: PromptItem; groupId: string }
 	| { type: 'promptUpdated'; prompt: PromptItem; groupId: string }
@@ -274,7 +274,7 @@ export class PromptPocketPanel {
 				if (prompt) {
 					await vscode.env.clipboard.writeText(this.normalizeClipboardContent(prompt.content));
 					const config = this.getConfig();
-					this.postMessage({ type: 'copied', title: prompt.title, showNotification: config.showCopyNotification });
+					this.postMessage({ type: 'copied', promptId: message.promptId, title: prompt.title, showNotification: config.showCopyNotification });
 				}
 				break;
 			}
@@ -1106,9 +1106,10 @@ export class PromptPocketPanel {
 			font-size: 0.85em;
 			font-family: var(--vscode-font-family);
 			cursor: pointer;
-			transition: background var(--transition);
+			transition: background var(--transition), color var(--transition), transform var(--transition);
 			flex-shrink: 0;
-			min-width: 70px;
+			/* Sized to fit the wider "Copied" label so the morph doesn't shift the row. */
+			min-width: 84px;
 		}
 
 		.prompt-copy-btn:hover {
@@ -1117,6 +1118,37 @@ export class PromptPocketPanel {
 
 		.prompt-copy-btn .icon {
 			font-size: 1.1em;
+		}
+
+		/* Transient confirmation state after a successful copy. */
+		.prompt-copy-btn.copied {
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			transform: scale(1.04);
+		}
+
+		.prompt-copy-btn.copied:hover {
+			background: var(--vscode-button-background);
+		}
+
+		/* Brief background highlight on the copied row, fading to transparent. */
+		@keyframes copyFlash {
+			/* Matrix green flash, fading out so it stays subtle. */
+			from { background-color: rgba(0, 255, 65, 0.35); }
+			to { background-color: transparent; }
+		}
+
+		.prompt-item.copy-flash {
+			animation: copyFlash 1200ms ease;
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			.prompt-copy-btn.copied {
+				transform: none;
+			}
+			.prompt-item.copy-flash {
+				animation: none;
+			}
 		}
 
 		.prompt-item-content {
@@ -1206,6 +1238,47 @@ export class PromptPocketPanel {
 			color: var(--vscode-badge-foreground);
 			border-radius: 10px;
 			white-space: nowrap;
+			flex-shrink: 0;
+		}
+
+		/* Full group ancestry breadcrumb shown next to a prompt title. */
+		.prompt-breadcrumb {
+			display: inline-flex;
+			align-items: center;
+			gap: var(--spacing-xs);
+			max-width: 45%;
+			padding: 2px 8px;
+			font-size: 0.75em;
+			line-height: 1.4;
+			background: var(--vscode-badge-background);
+			border-radius: 10px;
+			white-space: nowrap;
+			overflow: hidden;
+			flex-shrink: 0;
+		}
+
+		.prompt-breadcrumb-dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: var(--vscode-descriptionForeground);
+			flex-shrink: 0;
+		}
+
+		.prompt-breadcrumb-seg {
+			color: var(--vscode-descriptionForeground);
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.prompt-breadcrumb-leaf {
+			color: var(--vscode-badge-foreground, var(--vscode-foreground));
+			font-weight: 500;
+		}
+
+		.prompt-breadcrumb-sep {
+			color: var(--vscode-descriptionForeground);
+			opacity: 0.6;
 			flex-shrink: 0;
 		}
 
@@ -1950,6 +2023,16 @@ export class PromptPocketPanel {
 			pink: 'var(--color-pink)'
 		};
 
+		// Icons reused by client-side rendering (injected at build time).
+		const COPY_ICON = \`${Icons.copy}\`;
+		const CHECK_ICON = \`${Icons.check}\`;
+
+		// How long the per-row "Copied" button state lingers before reverting.
+		const COPIED_RESET_MS = 1300;
+		// Tracks pending button reverts keyed by promptId so repeated copies of
+		// the same row reset cleanly instead of stacking timers.
+		const copyResetTimers = new Map();
+
 		// DOM elements
 		const elements = {
 			searchInput: document.getElementById('searchInput'),
@@ -2295,6 +2378,38 @@ export class PromptPocketPanel {
 			elements.groupsList.innerHTML = html;
 		}
 
+		// Render the full group ancestry as a compact breadcrumb chip:
+		// a color dot, then segments joined by chevrons with ancestors muted
+		// and the leaf emphasized. Long paths collapse the middle so the row
+		// never overflows; the full path is always available via the title.
+		function renderBreadcrumb(path, color) {
+			if (!path || path.length === 0) return '';
+
+			const dotStyle = color ? \`style="background: \${colorMap[color]}"\` : '';
+			const fullPath = path.join(' / ');
+
+			let segments = path;
+			let collapsed = false;
+			if (path.length > 3) {
+				segments = [path[0], '\\u2026', path[path.length - 1]];
+				collapsed = true;
+			}
+
+			const lastIndex = segments.length - 1;
+			const parts = segments.map((segment, index) => {
+				// The injected ellipsis placeholder is not a real group name.
+				if (collapsed && segment === '\\u2026') {
+					return '<span class="prompt-breadcrumb-seg">\\u2026</span>';
+				}
+				const isLeaf = index === lastIndex;
+				const cls = isLeaf ? 'prompt-breadcrumb-seg prompt-breadcrumb-leaf' : 'prompt-breadcrumb-seg';
+				return \`<span class="\${cls}">\${escapeHtml(segment)}</span>\`;
+			});
+
+			const inner = parts.join('<span class="prompt-breadcrumb-sep" aria-hidden="true">\\u203A</span>');
+			return \`<span class="prompt-breadcrumb" title="\${escapeHtml(fullPath)}"><span class="prompt-breadcrumb-dot" \${dotStyle}></span>\${inner}</span>\`;
+		}
+
 		function renderPromptList() {
 			const { pinned, filtered } = getFilteredPrompts();
 			const previewLines = getPreviewLines();
@@ -2350,7 +2465,7 @@ export class PromptPocketPanel {
 						<div class="prompt-item-content">
 							<div class="prompt-title">
 								\${titleGlyph}<span class="prompt-title-text">\${titleHtml}</span>
-								\${showGroupBadge ? \`<span class="prompt-group-badge" style="\${color ? 'background:' + colorMap[color] : ''}">\${escapeHtml(path[path.length - 1])}</span>\` : ''}
+								\${showGroupBadge ? renderBreadcrumb(path, color) : ''}
 							</div>
 							<div class="prompt-preview">\${previewHtml}</div>
 						</div>
@@ -2404,6 +2519,42 @@ export class PromptPocketPanel {
 			setTimeout(() => {
 				elements.toast.classList.remove('visible');
 			}, duration);
+		}
+
+		// In-row confirmation that a prompt was copied: morph its Copy button
+		// to a checkmark + "Copied" and flash the row. Both cues self-expire.
+		// No-ops if the row isn't currently rendered (e.g. it was filtered out
+		// between the click and the extension's reply).
+		function flashCopied(promptId) {
+			if (!promptId) return;
+			const row = elements.promptList.querySelector('.prompt-item[data-prompt-id="' + CSS.escape(promptId) + '"]');
+			if (!row) return;
+
+			const btn = row.querySelector('.copy-btn');
+			if (btn) {
+				const existing = copyResetTimers.get(promptId);
+				if (existing) clearTimeout(existing);
+
+				btn.classList.add('copied');
+				btn.innerHTML = '<span class="icon">' + CHECK_ICON + '</span>Copied';
+
+				const timer = setTimeout(() => {
+					copyResetTimers.delete(promptId);
+					// The list may have re-rendered while we waited; only revert
+					// the exact button we morphed if it's still in the DOM.
+					if (!btn.isConnected) return;
+					btn.classList.remove('copied');
+					btn.innerHTML = '<span class="icon">' + COPY_ICON + '</span>Copy';
+				}, COPIED_RESET_MS);
+				copyResetTimers.set(promptId, timer);
+			}
+
+			// Restart the flash animation on repeat copies by removing the class
+			// before re-adding it on the next frame.
+			row.classList.remove('copy-flash');
+			void row.offsetWidth;
+			row.classList.add('copy-flash');
+			row.addEventListener('animationend', () => row.classList.remove('copy-flash'), { once: true });
 		}
 
 		// Prompt Modal
@@ -3927,6 +4078,7 @@ export class PromptPocketPanel {
 					break;
 
 				case 'copied':
+					flashCopied(message.promptId);
 					if (message.showNotification) {
 						showToast(\`Copied: \${message.title}\`);
 					}

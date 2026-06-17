@@ -182,4 +182,50 @@ suite('Prompt Pocket Extension Test Suite', () => {
 			}
 		});
 	});
+
+	// Locks in the contract that clicking a prompt row in the sidebar tree opens
+	// the editor (rather than silently copying to the clipboard). The Copy paths
+	// are still reachable via the inline icon and the context menu; they are
+	// covered by the 'All commands are registered' check above.
+	suite('Tree Item Default Command', () => {
+		test('Clicking a prompt tree item invokes editPrompt with the prompt as its argument', () => {
+			const { PromptTreeItem } = require('../../src/treeDataProvider');
+			const prompt: PromptItem = {
+				id: 'click-test-prompt',
+				title: 'Click me',
+				content: 'content'
+			};
+
+			const item = new PromptTreeItem(prompt, vscode.TreeItemCollapsibleState.None);
+
+			assert.ok(item.command, 'Prompt tree item should have a default click command');
+			assert.strictEqual(
+				item.command?.command,
+				'prompt-pocket.editPrompt',
+				'Clicking a prompt should open the editor (not copy to clipboard)'
+			);
+			assert.deepStrictEqual(
+				item.command?.arguments,
+				[prompt],
+				'The clicked prompt should be passed as the command argument'
+			);
+		});
+
+		test('Group tree items have no default click command (rows expand/collapse)', () => {
+			const { PromptTreeItem } = require('../../src/treeDataProvider');
+			const group: PromptGroup = {
+				id: 'click-test-group',
+				name: 'A group',
+				children: [],
+				prompts: []
+			};
+
+			const item = new PromptTreeItem(group, vscode.TreeItemCollapsibleState.None);
+			assert.strictEqual(
+				item.command,
+				undefined,
+				'Group rows should not have a click action; they expand/collapse instead'
+			);
+		});
+	});
 });

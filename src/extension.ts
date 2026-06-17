@@ -163,8 +163,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		// Open editor for multiline content
-		const newContent = await editPromptContent(prompt.content, prompt.title);
+		const newContent = await editPromptContent(prompt.content);
 
 		if (newContent !== undefined) {
 			await storage.updatePrompt(parentGroup.id, prompt.id, { content: newContent });
@@ -494,9 +493,14 @@ function normalizeClipboardContent(content: string): string {
 }
 
 /**
- * Open a text editor for editing multiline prompt content
+ * Open a text editor for editing multiline prompt content.
+ *
+ * Opens in the active editor column (no split) and autosaves the buffer on
+ * close: whatever text is in the document when the user closes the tab is
+ * returned to the caller, with no Save/Discard prompt. To revert an accidental
+ * edit the user can Cmd/Ctrl+Z inside the document before closing it.
  */
-async function editPromptContent(initialContent: string, title?: string): Promise<string | undefined> {
+async function editPromptContent(initialContent: string): Promise<string | undefined> {
 	const doc = await vscode.workspace.openTextDocument({
 		content: initialContent,
 		language: 'markdown'
@@ -504,39 +508,14 @@ async function editPromptContent(initialContent: string, title?: string): Promis
 
 	await vscode.window.showTextDocument(doc, {
 		preview: false,
-		viewColumn: vscode.ViewColumn.Beside
+		viewColumn: vscode.ViewColumn.Active
 	});
 
-	// Show a message to guide the user
-	const message = title 
-		? `Editing prompt: ${title}. Close the editor when done.`
-		: 'Enter prompt content. Close the editor when done.';
-	
-	vscode.window.showInformationMessage(message);
-
-	// Wait for the document to be closed
 	return new Promise<string | undefined>((resolve) => {
 		const disposable = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
 			if (closedDoc === doc) {
 				disposable.dispose();
-				// Check if the document was modified
-				if (doc.isDirty) {
-					// User closed without saving, ask if they want to keep changes
-					vscode.window.showWarningMessage(
-						'Document has unsaved changes. Save changes?',
-						'Save',
-						'Discard'
-					).then((choice) => {
-						if (choice === 'Save') {
-							resolve(doc.getText());
-						} else {
-							resolve(undefined);
-						}
-					});
-				} else {
-					// Document was saved or unchanged
-					resolve(doc.getText());
-				}
+				resolve(doc.getText());
 			}
 		});
 	});

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Sidebar tree click now opens a prompt for editing instead of copying it to the clipboard.** This is a behavior change for existing users: previously a single click on a prompt row copied its content silently. The new behavior matches the broader VS Code / Cursor convention of "select an item to open it." Copy is still one click away via the inline `$(copy)` icon that appears on row hover, the right-click context menu's **Copy Prompt** action, the Command Palette entries (`Copy Prompt from Prompt Pocket` and `Search Prompts`), and the editor panel's Enter-to-copy. The editor panel (`Cmd+Alt+P` / `Ctrl+Alt+P`) is intentionally unchanged so its search-first / copy-on-Enter workflow continues to work as before.
+- **Prompt-content editor opens in the active editor column instead of splitting the window**, autosaves on close, and no longer shows the "Editing prompt: … Close the editor when done" toast. The editor now feels like opening a note: click → type → close. Buffer contents are committed to the prompt when the tab closes, with no Save / Discard dialog. To revert an accidental edit, undo (`Cmd/Ctrl+Z`) inside the document before closing it. This change applies to all three editor paths: clicking a prompt in the tree, the context-menu **Edit Content** action, and the **New Prompt** flow.
+
 ## [0.2.0] - 2026-06-08
 
 ### Added

@@ -32,9 +32,12 @@ export class PromptTreeItem extends vscode.TreeItem {
 			} else {
 				this.iconPath = new vscode.ThemeIcon('note');
 			}
+			// Clicking a prompt row opens the editor so users can read/edit content;
+			// the inline $(copy) icon and the context-menu Copy Prompt action remain
+			// the explicit copy paths.
 			this.command = {
-				command: 'prompt-pocket.copyPrompt',
-				title: 'Copy Prompt',
+				command: 'prompt-pocket.editPrompt',
+				title: 'Edit Prompt',
 				arguments: [node]
 			};
 		} else {

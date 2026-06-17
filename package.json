@@ -190,7 +190,7 @@
             "clipboard"
           ],
           "enumDescriptions": [
-            "Open VS Code Copilot Chat with the prompt prefilled. Falls back to copying to the clipboard if Copilot Chat is not available (e.g. in Cursor / VSCodium / VS Code without Copilot).",
+            "Open the editor's AI chat in Agent mode with the prompt prefilled (Copilot Chat in VS Code 1.95+, Cursor's chat panel in Cursor). Falls back to copying to the clipboard if no AI chat is available (e.g. in VSCodium or VS Code without Copilot).",
             "Insert the prompt at the cursor in the active editor (replaces any selected text). Falls back to copying to the clipboard if no editor is active.",
             "Send the prompt to the dedicated 'Prompt Pocket' integrated terminal. No newline is appended, so the prompt sits at the terminal prompt until you press Enter.",
             "Copy the prompt to the clipboard (same as the Copy button)."

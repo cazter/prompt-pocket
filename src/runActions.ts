@@ -119,23 +119,31 @@ const STRATEGIES: Record<
 > = {
 	copilotChat: async (content, title, config) => {
 		try {
-			// `workbench.action.chat.open` is the documented VS Code 1.85+
-			// Copilot Chat entry point and accepts a query string to prefill.
-			// It throws if Copilot isn't installed (e.g. in Cursor / VSCodium
-			// / VS Code without Copilot), which we catch and fall back from.
-			await vscode.commands.executeCommand('workbench.action.chat.open', { query: content });
+			// `workbench.action.chat.open` is the documented VS Code chat entry
+			// point. The `mode: 'agent'` hint asks the host (Copilot Chat in
+			// VS Code 1.95+, Cursor's chat panel in Cursor) to open in agent
+			// mode rather than the default (typically "ask"), which matches the
+			// "Run this prompt" mental model better. Older VS Code versions and
+			// chat hosts that don't recognize the hint silently ignore it and
+			// fall through to their default mode — no regression. The command
+			// throws when no chat provider is registered (e.g. VS Code without
+			// Copilot installed), which we catch to drive the clipboard fallback.
+			await vscode.commands.executeCommand('workbench.action.chat.open', {
+				query: content,
+				mode: 'agent'
+			});
 			return {
 				kind: 'done',
 				action: 'copilotChat',
-				message: `Sent to Copilot Chat: ${title}`
+				message: `Sent to AI chat (Agent mode): ${title}`
 			};
 		} catch {
 			await copyPromptContentWithFeedback(content, title, config);
 			return {
 				kind: 'fellback',
 				from: 'copilotChat',
-				reason: 'Copilot Chat is not available in this editor',
-				message: `Copilot Chat not available — prompt copied to clipboard: ${title}`
+				reason: 'No AI chat is available in this editor',
+				message: `AI chat not available — prompt copied to clipboard: ${title}`
 			};
 		}
 	},

@@ -77,7 +77,7 @@ All settings live under `promptPocket.*` in VS Code Settings (`Cmd/Ctrl+,`).
 - `promptPocket.modalClickOutsideToClose` *(boolean, default `true`)* — allow closing the prompt modal by clicking outside it. Unsaved changes still trigger the confirm dialog.
 - `promptPocket.enableFileReferences` *(boolean, default `true`)* — enable `@` file mentions and drag-and-drop file linking inside the prompt editor.
 - `promptPocket.runAction` *(`"copilotChat"` | `"insertAtCursor"` | `"terminal"` | `"clipboard"`, default `"copilotChat"`)* — what the Run (▶) button does when clicked on a prompt row in the sidebar tree:
-    - `copilotChat` — open Copilot Chat with the prompt prefilled; falls back to clipboard if Copilot isn't installed (Cursor / VSCodium / stock VS Code without Copilot all get the fallback).
+    - `copilotChat` — open the editor's AI chat in Agent mode with the prompt prefilled (Copilot Chat in VS Code 1.95+, Cursor's chat panel in Cursor). Falls back to clipboard if no AI chat is registered (VSCodium / VS Code without Copilot).
     - `insertAtCursor` — insert at the cursor in the active editor (replaces selection); falls back to clipboard if no editor is open.
     - `terminal` — send to a reusable "Prompt Pocket" integrated terminal; no newline is appended so you can review before pressing Enter.
     - `clipboard` — copy to clipboard (same as the Copy button).

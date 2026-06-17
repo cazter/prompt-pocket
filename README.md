@@ -42,7 +42,7 @@ After installing:
 
 There are three ways to reach your prompts:
 
-- **Sidebar tree** — Activity Bar → Prompt Pocket. **Click a prompt to open it for editing** in a markdown tab (autosaves on close — just type and close the tab when done; `Cmd/Ctrl+Z` to revert before closing). Use the inline copy icon on row hover (or right-click → **Copy Prompt**) to copy without opening the editor. Right-click a group or prompt for create / rename / duplicate / delete actions.
+- **Sidebar tree** — Activity Bar → Prompt Pocket. **Click a prompt to open it for editing** in a markdown tab — edits live-autosave back to the prompt as you type (no `Cmd/Ctrl+S` needed). Use the inline copy icon on row hover (or right-click → **Copy Prompt**) to copy without opening the editor. Right-click a group or prompt for create / rename / duplicate / delete actions.
 - **Editor panel** — `Cmd+Alt+P` / `Ctrl+Alt+P`. Search-first interface with arrow-key navigation, `Enter` to copy, and `Cmd/Ctrl+N` to start a new prompt while the panel is focused.
 - **Command Palette** — `Cmd+Alt+C` / `Ctrl+Alt+C` runs **Copy Prompt from Prompt Pocket**, a quick-pick of every prompt across every group. **Search Prompts** is also available from the palette.
 

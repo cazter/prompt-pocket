@@ -4,6 +4,7 @@ import { PromptTreeDataProvider } from './treeDataProvider';
 import { StorageService } from './storage';
 import { PromptGroup, PromptItem, validatePromptData } from './types';
 import { PromptPocketPanel } from './webviewPanel';
+import { RunAction, copyPromptContentWithFeedback, runPromptContent } from './runActions';
 
 export function activate(context: vscode.ExtensionContext) {
 	const storage = new StorageService(context);
@@ -20,6 +21,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	function shouldConfirmDelete(): boolean {
 		return getConfig().get<boolean>('confirmDelete', true);
+	}
+
+	function getRunAction(): RunAction {
+		return getConfig().get<RunAction>('runAction', 'copilotChat');
 	}
 
 	const treeView = vscode.window.createTreeView('prompt-pocket-view', {
@@ -52,11 +57,32 @@ export function activate(context: vscode.ExtensionContext) {
 		return searchGroups(data.groups);
 	}
 
-	// Copy prompt to clipboard
+	// Copy prompt to clipboard (inline icon + context-menu Copy Prompt action).
 	const copyPromptCommand = vscode.commands.registerCommand('prompt-pocket.copyPrompt', async (item: PromptItem) => {
-		await vscode.env.clipboard.writeText(normalizeClipboardContent(item.content));
-		if (shouldShowCopyNotification()) {
-			vscode.window.showInformationMessage(`Copied: ${item.title}`);
+		await copyPromptContentWithFeedback(item.content, item.title, {
+			showCopyNotification: shouldShowCopyNotification()
+		});
+	});
+
+	// Run prompt (inline play icon + context-menu Run Prompt action). Dispatches
+	// based on the promptPocket.runAction setting; falls back to clipboard if
+	// the configured action isn't reachable in the current editor.
+	const runPromptCommand = vscode.commands.registerCommand('prompt-pocket.runPrompt', async (item: PromptItem) => {
+		const result = await runPromptContent(item.content, item.title, {
+			runAction: getRunAction(),
+			showCopyNotification: shouldShowCopyNotification()
+		});
+		// Always toast the run outcome (independent of showCopyNotification) so
+		// the user has confirmation that the action ran AND so the fellback case
+		// surfaces clearly. The clipboard fallback inside runPromptContent already
+		// honors showCopyNotification for its own "Copied: ..." toast — this
+		// outer toast describes the run outcome itself.
+		if (result.kind === 'fellback') {
+			vscode.window.showWarningMessage(result.message);
+		} else if (shouldShowCopyNotification() || result.action !== 'clipboard') {
+			// Suppress only the "Copied: ..." double-toast for the explicit
+			// clipboard action when the user has disabled copy notifications.
+			vscode.window.showInformationMessage(result.message);
 		}
 	});
 
@@ -268,10 +294,9 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
-			if (shouldShowCopyNotification()) {
-				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
-			}
+			await copyPromptContentWithFeedback(selected.prompt.content, selected.prompt.title, {
+				showCopyNotification: shouldShowCopyNotification()
+			});
 		}
 	});
 
@@ -443,10 +468,9 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
-			if (shouldShowCopyNotification()) {
-				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
-			}
+			await copyPromptContentWithFeedback(selected.prompt.content, selected.prompt.title, {
+				showCopyNotification: shouldShowCopyNotification()
+			});
 		}
 	});
 
@@ -454,6 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
 		treeView,
 		openPanelCommand,
 		copyPromptCommand,
+		runPromptCommand,
 		createGroupCommand,
 		createSubgroupCommand,
 		createPromptCommand,
@@ -476,46 +501,6 @@ export function deactivate() {}
 
 function generateId(): string {
 	return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-}
-
-function normalizeClipboardContent(content: string): string {
-	const normalized = content.replace(/\r\n/g, '\n');
-	const lines = normalized.split('\n');
-	const isStructuralLine = (line: string): boolean => {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			return true;
-		}
-		return /^([-*+]|\d+[.)])\s+/.test(trimmed) || // bullet/numbered list
-			/^#{1,6}\s+/.test(trimmed) || // markdown heading
-			/^```/.test(trimmed) || // fenced code block
-			/^>\s+/.test(trimmed) || // blockquote
-			/^\|.*\|$/.test(trimmed) || // markdown table row
-			/^\s{2,}\S/.test(line); // indented/code-like line
-	};
-
-	if (lines.length <= 1) {
-		return normalized.replace(/[ \t]{2,}/g, ' ').trim();
-	}
-
-	let output = '';
-	for (let i = 0; i < lines.length; i++) {
-		const current = lines[i];
-		const next = i < lines.length - 1 ? lines[i + 1] : undefined;
-		output += current;
-		if (next === undefined) {
-			break;
-		}
-
-		const keepNewline = isStructuralLine(current) || isStructuralLine(next);
-		if (keepNewline) {
-			output += '\n';
-		} else {
-			output += ' ';
-		}
-	}
-
-	return output.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 /**

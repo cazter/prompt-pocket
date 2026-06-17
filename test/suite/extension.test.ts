@@ -144,6 +144,7 @@ suite('Prompt Pocket Extension Test Suite', () => {
 			const commands = await vscode.commands.getCommands(true);
 			const expectedCommands = [
 				'prompt-pocket.copyPrompt',
+				'prompt-pocket.runPrompt',
 				'prompt-pocket.createGroup',
 				'prompt-pocket.createSubgroup',
 				'prompt-pocket.createPrompt',
@@ -226,6 +227,117 @@ suite('Prompt Pocket Extension Test Suite', () => {
 				undefined,
 				'Group rows should not have a click action; they expand/collapse instead'
 			);
+		});
+	});
+
+	// Covers the new src/runActions.ts module: the shared clipboard helper +
+	// each Run strategy (clipboard happy path, copilotChat fallback,
+	// insertAtCursor happy + fallback, terminal happy + reuse).
+	//
+	// The Copilot Chat happy path is NOT exercised here because Copilot is not
+	// installed in the @vscode/test-electron host. It is verified manually in
+	// a Copilot-enabled VS Code as documented in the PR description.
+	suite('Run Actions', () => {
+		const {
+			normalizeClipboardContent,
+			copyPromptContentWithFeedback,
+			runPromptContent
+		} = require('../../src/runActions');
+
+		test('normalizeClipboardContent preserves markdown structure and unwraps soft lines', () => {
+			const input = '# Title\n\n- one\n- two\n\nSoft\nwrap\nparagraph.\n\n```\ncode\nblock\n```';
+			const out = normalizeClipboardContent(input);
+			assert.ok(out.includes('# Title'), 'heading kept on its own line');
+			assert.ok(out.includes('- one\n- two'), 'list items kept on separate lines');
+			assert.ok(out.includes('Soft wrap paragraph.'), 'paragraph soft-wraps collapsed to spaces');
+			assert.ok(out.includes('```\ncode\nblock\n```'), 'fenced code block kept verbatim');
+		});
+
+		test('copyPromptContentWithFeedback writes the normalized content to the system clipboard', async () => {
+			await copyPromptContentWithFeedback('hello world', 'Greeting', { showCopyNotification: false });
+			const clip = await vscode.env.clipboard.readText();
+			assert.strictEqual(clip, 'hello world');
+		});
+
+		test('runPromptContent: clipboard action copies the content and reports done', async () => {
+			const result = await runPromptContent('clip-test', 'Clip', {
+				runAction: 'clipboard',
+				showCopyNotification: false
+			});
+			assert.strictEqual(result.kind, 'done');
+			assert.strictEqual(result.action, 'clipboard');
+			const clip = await vscode.env.clipboard.readText();
+			assert.strictEqual(clip, 'clip-test');
+		});
+
+		test('runPromptContent: copilotChat falls back to clipboard when Copilot is not installed', async () => {
+			const result = await runPromptContent('copilot-fallback-payload', 'CFT', {
+				runAction: 'copilotChat',
+				showCopyNotification: false
+			});
+			assert.strictEqual(result.kind, 'fellback');
+			assert.strictEqual(result.from, 'copilotChat');
+			const clip = await vscode.env.clipboard.readText();
+			assert.strictEqual(clip, 'copilot-fallback-payload');
+		});
+
+		test('runPromptContent: insertAtCursor inserts into the active editor when one is open', async () => {
+			const doc = await vscode.workspace.openTextDocument({ content: '', language: 'plaintext' });
+			await vscode.window.showTextDocument(doc);
+			const result = await runPromptContent('inserted-payload', 'Inserted', {
+				runAction: 'insertAtCursor',
+				showCopyNotification: false
+			});
+			assert.strictEqual(result.kind, 'done');
+			assert.strictEqual(result.action, 'insertAtCursor');
+			assert.strictEqual(doc.getText(), 'inserted-payload');
+			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+		});
+
+		test('runPromptContent: insertAtCursor falls back to clipboard when no editor is active', async () => {
+			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+			const result = await runPromptContent('insert-fallback-payload', 'IFB', {
+				runAction: 'insertAtCursor',
+				showCopyNotification: false
+			});
+			assert.strictEqual(result.kind, 'fellback');
+			assert.strictEqual(result.from, 'insertAtCursor');
+			const clip = await vscode.env.clipboard.readText();
+			assert.strictEqual(clip, 'insert-fallback-payload');
+		});
+
+		test('runPromptContent: terminal action creates the named "Prompt Pocket" terminal and reuses it', async () => {
+			// Make sure no prior Prompt Pocket terminal exists from another test.
+			for (const t of vscode.window.terminals) {
+				if (t.name === 'Prompt Pocket') {
+					t.dispose();
+				}
+			}
+			await new Promise((resolve) => setTimeout(resolve, 100));
+
+			const first = await runPromptContent('echo hi', 'Echo', {
+				runAction: 'terminal',
+				showCopyNotification: false
+			});
+			assert.strictEqual(first.kind, 'done');
+			assert.strictEqual(first.action, 'terminal');
+
+			const promptPocketTerminals = vscode.window.terminals.filter((t) => t.name === 'Prompt Pocket');
+			assert.strictEqual(promptPocketTerminals.length, 1, 'one Prompt Pocket terminal should exist after first run');
+
+			const beforeCount = vscode.window.terminals.length;
+			const second = await runPromptContent('echo again', 'EchoAgain', {
+				runAction: 'terminal',
+				showCopyNotification: false
+			});
+			assert.strictEqual(second.kind, 'done');
+			assert.strictEqual(vscode.window.terminals.length, beforeCount, 'second run should reuse the existing terminal');
+
+			for (const t of vscode.window.terminals) {
+				if (t.name === 'Prompt Pocket') {
+					t.dispose();
+				}
+			}
 		});
 	});
 });

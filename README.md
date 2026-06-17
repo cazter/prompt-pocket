@@ -12,6 +12,7 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 
 - **Hierarchical organization**: group prompts and nest one level of subgroups
 - **One-click copy**: click any prompt in the tree or panel to copy it to the clipboard
+- **Run (▶) button**: send any prompt to Copilot Chat, insert it at your cursor, pipe it to a dedicated terminal, or just copy it — your choice via `promptPocket.runAction`
 - **Editor panel**: search-first webview that opens as a full editor tab
 - **Sidebar tree view**: traditional hierarchical navigation in the activity bar
 - **File mentions**: type `@` in the prompt editor to attach workspace files; drag-and-drop also works (hold `Shift` when dragging from the Explorer)
@@ -75,6 +76,11 @@ All settings live under `promptPocket.*` in VS Code Settings (`Cmd/Ctrl+,`).
 - `promptPocket.confirmDelete` *(boolean, default `true`)* — ask for confirmation before deleting a prompt or group.
 - `promptPocket.modalClickOutsideToClose` *(boolean, default `true`)* — allow closing the prompt modal by clicking outside it. Unsaved changes still trigger the confirm dialog.
 - `promptPocket.enableFileReferences` *(boolean, default `true`)* — enable `@` file mentions and drag-and-drop file linking inside the prompt editor.
+- `promptPocket.runAction` *(`"copilotChat"` | `"insertAtCursor"` | `"terminal"` | `"clipboard"`, default `"copilotChat"`)* — what the Run (▶) button does when clicked on a prompt row in the sidebar tree:
+    - `copilotChat` — open Copilot Chat with the prompt prefilled; falls back to clipboard if Copilot isn't installed (Cursor / VSCodium / stock VS Code without Copilot all get the fallback).
+    - `insertAtCursor` — insert at the cursor in the active editor (replaces selection); falls back to clipboard if no editor is open.
+    - `terminal` — send to a reusable "Prompt Pocket" integrated terminal; no newline is appended so you can review before pressing Enter.
+    - `clipboard` — copy to clipboard (same as the Copy button).
 
 ## Import / Export
 

@@ -4,6 +4,7 @@ import { PromptTreeDataProvider } from './treeDataProvider';
 import { StorageService } from './storage';
 import { PromptGroup, PromptItem, validatePromptData } from './types';
 import { PromptPocketPanel } from './webviewPanel';
+import { RunAction, copyPromptContentWithFeedback, runPromptContent } from './runActions';
 
 export function activate(context: vscode.ExtensionContext) {
 	const storage = new StorageService(context);
@@ -20,6 +21,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	function shouldConfirmDelete(): boolean {
 		return getConfig().get<boolean>('confirmDelete', true);
+	}
+
+	function getRunAction(): RunAction {
+		return getConfig().get<RunAction>('runAction', 'copilotChat');
 	}
 
 	const treeView = vscode.window.createTreeView('prompt-pocket-view', {
@@ -52,11 +57,32 @@ export function activate(context: vscode.ExtensionContext) {
 		return searchGroups(data.groups);
 	}
 
-	// Copy prompt to clipboard
+	// Copy prompt to clipboard (inline icon + context-menu Copy Prompt action).
 	const copyPromptCommand = vscode.commands.registerCommand('prompt-pocket.copyPrompt', async (item: PromptItem) => {
-		await vscode.env.clipboard.writeText(normalizeClipboardContent(item.content));
-		if (shouldShowCopyNotification()) {
-			vscode.window.showInformationMessage(`Copied: ${item.title}`);
+		await copyPromptContentWithFeedback(item.content, item.title, {
+			showCopyNotification: shouldShowCopyNotification()
+		});
+	});
+
+	// Run prompt (inline play icon + context-menu Run Prompt action). Dispatches
+	// based on the promptPocket.runAction setting; falls back to clipboard if
+	// the configured action isn't reachable in the current editor.
+	const runPromptCommand = vscode.commands.registerCommand('prompt-pocket.runPrompt', async (item: PromptItem) => {
+		const result = await runPromptContent(item.content, item.title, {
+			runAction: getRunAction(),
+			showCopyNotification: shouldShowCopyNotification()
+		});
+		// Always toast the run outcome (independent of showCopyNotification) so
+		// the user has confirmation that the action ran AND so the fellback case
+		// surfaces clearly. The clipboard fallback inside runPromptContent already
+		// honors showCopyNotification for its own "Copied: ..." toast — this
+		// outer toast describes the run outcome itself.
+		if (result.kind === 'fellback') {
+			vscode.window.showWarningMessage(result.message);
+		} else if (shouldShowCopyNotification() || result.action !== 'clipboard') {
+			// Suppress only the "Copied: ..." double-toast for the explicit
+			// clipboard action when the user has disabled copy notifications.
+			vscode.window.showInformationMessage(result.message);
 		}
 	});
 
@@ -109,18 +135,33 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		// Open a new editor for multiline content
-		const content = await editPromptContent('');
+		// Create the prompt up front with empty content so it appears in the
+		// tree immediately, then open the editor with live autosave wired into
+		// the same prompt id. This makes the new prompt feel "real" the moment
+		// the user starts typing.
+		const prompt: PromptItem = {
+			id: generateId(),
+			title,
+			content: ''
+		};
+		await storage.addPromptToGroup(group.id, prompt);
+		refreshAll();
 
-		if (content !== undefined) {
-			const prompt: PromptItem = {
-				id: generateId(),
-				title,
-				content: content || ''
-			};
-			await storage.addPromptToGroup(group.id, prompt);
-			refreshAll();
-		}
+		let lastSavedContent = '';
+		await editPromptContent({
+			id: prompt.id,
+			title: prompt.title,
+			initialContent: '',
+			storageDir: context.globalStorageUri,
+			onUpdate: async (newContent) => {
+				if (newContent === lastSavedContent) {
+					return;
+				}
+				lastSavedContent = newContent;
+				await storage.updatePrompt(group.id, prompt.id, { content: newContent });
+				refreshAll();
+			}
+		});
 	});
 
 	// Rename group
@@ -163,13 +204,23 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		// Open editor for multiline content
-		const newContent = await editPromptContent(prompt.content, prompt.title);
-
-		if (newContent !== undefined) {
-			await storage.updatePrompt(parentGroup.id, prompt.id, { content: newContent });
-			refreshAll();
-		}
+		// Capture the last persisted content so we can skip no-op saves while
+		// the user types (each save triggers a tree + panel refresh).
+		let lastSavedContent = prompt.content;
+		await editPromptContent({
+			id: prompt.id,
+			title: prompt.title,
+			initialContent: prompt.content,
+			storageDir: context.globalStorageUri,
+			onUpdate: async (newContent) => {
+				if (newContent === lastSavedContent) {
+					return;
+				}
+				lastSavedContent = newContent;
+				await storage.updatePrompt(parentGroup.id, prompt.id, { content: newContent });
+				refreshAll();
+			}
+		});
 	});
 
 	// Delete group
@@ -243,10 +294,9 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
-			if (shouldShowCopyNotification()) {
-				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
-			}
+			await copyPromptContentWithFeedback(selected.prompt.content, selected.prompt.title, {
+				showCopyNotification: shouldShowCopyNotification()
+			});
 		}
 	});
 
@@ -418,10 +468,9 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (selected) {
-			await vscode.env.clipboard.writeText(normalizeClipboardContent(selected.prompt.content));
-			if (shouldShowCopyNotification()) {
-				vscode.window.showInformationMessage(`Copied: ${selected.prompt.title}`);
-			}
+			await copyPromptContentWithFeedback(selected.prompt.content, selected.prompt.title, {
+				showCopyNotification: shouldShowCopyNotification()
+			});
 		}
 	});
 
@@ -429,6 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
 		treeView,
 		openPanelCommand,
 		copyPromptCommand,
+		runPromptCommand,
 		createGroupCommand,
 		createSubgroupCommand,
 		createPromptCommand,
@@ -453,92 +503,124 @@ function generateId(): string {
 	return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-function normalizeClipboardContent(content: string): string {
-	const normalized = content.replace(/\r\n/g, '\n');
-	const lines = normalized.split('\n');
-	const isStructuralLine = (line: string): boolean => {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			return true;
-		}
-		return /^([-*+]|\d+[.)])\s+/.test(trimmed) || // bullet/numbered list
-			/^#{1,6}\s+/.test(trimmed) || // markdown heading
-			/^```/.test(trimmed) || // fenced code block
-			/^>\s+/.test(trimmed) || // blockquote
-			/^\|.*\|$/.test(trimmed) || // markdown table row
-			/^\s{2,}\S/.test(line); // indented/code-like line
-	};
-
-	if (lines.length <= 1) {
-		return normalized.replace(/[ \t]{2,}/g, ' ').trim();
-	}
-
-	let output = '';
-	for (let i = 0; i < lines.length; i++) {
-		const current = lines[i];
-		const next = i < lines.length - 1 ? lines[i + 1] : undefined;
-		output += current;
-		if (next === undefined) {
-			break;
-		}
-
-		const keepNewline = isStructuralLine(current) || isStructuralLine(next);
-		if (keepNewline) {
-			output += '\n';
-		} else {
-			output += ' ';
-		}
-	}
-
-	return output.replace(/[ \t]{2,}/g, ' ').trim();
-}
+/**
+ * Tracks the markdown editor currently open for each prompt so a second
+ * click on the same prompt focuses the existing tab instead of stacking
+ * a new one. Cleaned up in the close handler below.
+ */
+const openPromptEditors = new Map<string, vscode.TextDocument>();
 
 /**
- * Open a text editor for editing multiline prompt content
+ * Open a markdown editor for a prompt's content with live autosave.
+ *
+ * The editor is backed by a real file inside the extension's globalStorageUri
+ * (`edit-cache/<safe-title>.<id>.md`). Backing it with a file — rather than an
+ * untitled buffer — is the only way to suppress VS Code's dirty marker and the
+ * "Save? Don't Save?" close dialog while still using the standard markdown
+ * editor surface. globalState remains the source of truth: the cache file is
+ * rewritten from `initialContent` every time we open the editor, so external
+ * edits (e.g. from the editor panel) win on reopen.
+ *
+ * Every text change is debounced ~300ms and then flushed: `doc.save()` writes
+ * the buffer to the cache file (clearing the dirty dot), and `onUpdate` is
+ * called with the fresh text so the caller can persist it to globalState.
+ * Any pending edit is flushed immediately on close, and saves are serialized
+ * to prevent read-modify-write races inside `StorageService.updatePrompt`.
+ *
+ * The returned promise resolves once the editor has been shown — it does NOT
+ * wait for the document to be closed. Editing is fire-and-forget from the
+ * caller's perspective; all persistence flows through `onUpdate`.
+ *
+ * TODO: orphan cache files (whose prompt was deleted or renamed) currently
+ * linger in globalStorageUri. Acceptable as a small disk cost; revisit if the
+ * cache grows unboundedly for heavy users.
  */
-async function editPromptContent(initialContent: string, title?: string): Promise<string | undefined> {
-	const doc = await vscode.workspace.openTextDocument({
-		content: initialContent,
-		language: 'markdown'
-	});
+async function editPromptContent(options: {
+	id: string;
+	title: string;
+	initialContent: string;
+	storageDir: vscode.Uri;
+	onUpdate: (content: string) => Promise<void> | void;
+}): Promise<void> {
+	const { id, title, initialContent, storageDir, onUpdate } = options;
+
+	const existing = openPromptEditors.get(id);
+	if (existing && !existing.isClosed) {
+		await vscode.window.showTextDocument(existing, {
+			preview: false,
+			viewColumn: vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One
+		});
+		return;
+	}
+
+	const cacheDir = vscode.Uri.joinPath(storageDir, 'edit-cache');
+	await vscode.workspace.fs.createDirectory(cacheDir);
+	const filename = `${sanitizePromptFilename(title)}.${id}.md`;
+	const fileUri = vscode.Uri.joinPath(cacheDir, filename);
+	await vscode.workspace.fs.writeFile(fileUri, Buffer.from(initialContent, 'utf8'));
+
+	const doc = await vscode.workspace.openTextDocument(fileUri);
+	openPromptEditors.set(id, doc);
 
 	await vscode.window.showTextDocument(doc, {
 		preview: false,
-		viewColumn: vscode.ViewColumn.Beside
+		viewColumn: vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One
 	});
 
-	// Show a message to guide the user
-	const message = title 
-		? `Editing prompt: ${title}. Close the editor when done.`
-		: 'Enter prompt content. Close the editor when done.';
-	
-	vscode.window.showInformationMessage(message);
+	const SAVE_DEBOUNCE_MS = 300;
+	let pendingSave: NodeJS.Timeout | undefined;
+	// Serialize saves so that a debounced flush still in flight can't be
+	// clobbered by the next one. StorageService.updatePrompt does a
+	// load -> mutate -> save sequence which is not atomic.
+	let saveQueue: Promise<void> = Promise.resolve();
 
-	// Wait for the document to be closed
-	return new Promise<string | undefined>((resolve) => {
-		const disposable = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
-			if (closedDoc === doc) {
-				disposable.dispose();
-				// Check if the document was modified
+	const flush = (): Promise<void> => {
+		if (pendingSave) {
+			clearTimeout(pendingSave);
+			pendingSave = undefined;
+		}
+		saveQueue = saveQueue.then(async () => {
+			try {
 				if (doc.isDirty) {
-					// User closed without saving, ask if they want to keep changes
-					vscode.window.showWarningMessage(
-						'Document has unsaved changes. Save changes?',
-						'Save',
-						'Discard'
-					).then((choice) => {
-						if (choice === 'Save') {
-							resolve(doc.getText());
-						} else {
-							resolve(undefined);
-						}
-					});
-				} else {
-					// Document was saved or unchanged
-					resolve(doc.getText());
+					await doc.save();
 				}
+				await onUpdate(doc.getText());
+			} catch (err) {
+				vscode.window.showErrorMessage(
+					`Failed to save prompt: ${err instanceof Error ? err.message : String(err)}`
+				);
 			}
 		});
+		return saveQueue;
+	};
+
+	const changeSubscription = vscode.workspace.onDidChangeTextDocument((event) => {
+		if (event.document !== doc) {
+			return;
+		}
+		if (pendingSave) {
+			clearTimeout(pendingSave);
+		}
+		pendingSave = setTimeout(() => { void flush(); }, SAVE_DEBOUNCE_MS);
 	});
+
+	const closeSubscription = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
+		if (closedDoc !== doc) {
+			return;
+		}
+		changeSubscription.dispose();
+		closeSubscription.dispose();
+		openPromptEditors.delete(id);
+		void flush();
+	});
+}
+
+/**
+ * Strip filesystem-unsafe characters from a prompt title so it can be used
+ * inside a cache filename. Empty / all-stripped titles fall back to "prompt".
+ */
+function sanitizePromptFilename(input: string): string {
+	const cleaned = input.replace(/[\\/:*?"<>|]/g, '-').trim().substring(0, 80);
+	return cleaned || 'prompt';
 }
 

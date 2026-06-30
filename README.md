@@ -12,6 +12,7 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 
 - **Hierarchical organization**: group prompts and nest one level of subgroups
 - **One-click copy**: click any prompt in the tree or panel to copy it to the clipboard
+- **Run (▶) button**: send any prompt to Copilot Chat, insert it at your cursor, pipe it to a dedicated terminal, or just copy it — your choice via `promptPocket.runAction`
 - **Editor panel**: search-first webview that opens as a full editor tab
 - **Sidebar tree view**: traditional hierarchical navigation in the activity bar
 - **File mentions**: type `@` in the prompt editor to attach workspace files; drag-and-drop also works (hold `Shift` when dragging from the Explorer)
@@ -42,7 +43,7 @@ After installing:
 
 There are three ways to reach your prompts:
 
-- **Sidebar tree** — Activity Bar → Prompt Pocket. Right-click a group or prompt for create / rename / duplicate / delete actions.
+- **Sidebar tree** — Activity Bar → Prompt Pocket. **Click a prompt to open it for editing** in a markdown tab — edits live-autosave back to the prompt as you type (no `Cmd/Ctrl+S` needed). Use the inline copy icon on row hover (or right-click → **Copy Prompt**) to copy without opening the editor. Right-click a group or prompt for create / rename / duplicate / delete actions.
 - **Editor panel** — `Cmd+Alt+P` / `Ctrl+Alt+P`. Search-first interface with arrow-key navigation, `Enter` to copy, and `Cmd/Ctrl+N` to start a new prompt while the panel is focused.
 - **Command Palette** — `Cmd+Alt+C` / `Ctrl+Alt+C` runs **Copy Prompt from Prompt Pocket**, a quick-pick of every prompt across every group. **Search Prompts** is also available from the palette.
 
@@ -75,6 +76,11 @@ All settings live under `promptPocket.*` in VS Code Settings (`Cmd/Ctrl+,`).
 - `promptPocket.confirmDelete` *(boolean, default `true`)* — ask for confirmation before deleting a prompt or group.
 - `promptPocket.modalClickOutsideToClose` *(boolean, default `true`)* — allow closing the prompt modal by clicking outside it. Unsaved changes still trigger the confirm dialog.
 - `promptPocket.enableFileReferences` *(boolean, default `true`)* — enable `@` file mentions and drag-and-drop file linking inside the prompt editor.
+- `promptPocket.runAction` *(`"copilotChat"` | `"insertAtCursor"` | `"terminal"` | `"clipboard"`, default `"copilotChat"`)* — what the Run (▶) button does when clicked on a prompt row in the sidebar tree:
+    - `copilotChat` — open the editor's AI chat in Agent mode with the prompt prefilled (Copilot Chat in VS Code 1.95+, Cursor's chat panel in Cursor). Falls back to clipboard if no AI chat is registered (VSCodium / VS Code without Copilot).
+    - `insertAtCursor` — insert at the cursor in the active editor (replaces selection); falls back to clipboard if no editor is open.
+    - `terminal` — send to a reusable "Prompt Pocket" integrated terminal; no newline is appended so you can review before pressing Enter.
+    - `clipboard` — copy to clipboard (same as the Copy button).
 
 ## Import / Export
 

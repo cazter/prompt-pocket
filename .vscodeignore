@@ -13,6 +13,8 @@ pnpm-lock.yaml
 # Development config
 .vscode
 .vscode-test
+.claude
+.interface-design
 .editorconfig
 .eslintignore
 .eslintrc.json

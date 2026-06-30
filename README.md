@@ -11,7 +11,7 @@ A lightweight VS Code extension for organizing and quickly copying reusable prom
 ## Features
 
 - **Hierarchical organization**: group prompts and nest one level of subgroups
-- **One-click copy**: click any prompt in the tree or panel to copy it to the clipboard
+- **One-click copy**: use the sidebar copy icon, Command Palette, or editor panel to copy prompts to the clipboard
 - **Run (▶) button**: send any prompt to Copilot Chat, insert it at your cursor, pipe it to a dedicated terminal, or just copy it — your choice via `promptPocket.runAction`
 - **Editor panel**: search-first webview that opens as a full editor tab
 - **Sidebar tree view**: traditional hierarchical navigation in the activity bar
@@ -35,7 +35,7 @@ After installing:
 1. Click the Prompt Pocket icon in the Activity Bar to open the sidebar tree.
 2. Press `Cmd+Alt+P` (`Ctrl+Alt+P` on Windows / Linux) to open the editor panel in a tab.
 3. Click **Add** to create your first prompt, or **+** in the Groups sidebar to create a group first.
-4. Click any prompt to copy it to your clipboard.
+4. Click a prompt in the sidebar to open it for editing, or use its copy icon to copy it to your clipboard.
 
 ![File Mention Autocomplete](media/file_mention_autocomplete.png)
 

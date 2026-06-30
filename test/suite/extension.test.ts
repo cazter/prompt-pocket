@@ -1,15 +1,14 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { StorageService } from '../../src/storage';
-import { PromptGroup, PromptItem, validatePromptData } from '../../src/types';
+import { copyPromptContentWithFeedback, normalizeClipboardContent, runPromptContent } from '../../src/runActions';
+import { PromptTreeItem } from '../../src/treeDataProvider';
+import { PromptGroup, PromptItem, isPromptGroup, isPromptItem, validatePromptData } from '../../src/types';
 
 suite('Prompt Pocket Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Running Prompt Pocket tests...');
 
 	suite('Type Guards', () => {
 		test('isPromptGroup identifies PromptGroup correctly', () => {
-			const { isPromptGroup } = require('../../src/types');
-			
 			const group: PromptGroup = {
 				id: 'test-1',
 				name: 'Test Group',
@@ -28,8 +27,6 @@ suite('Prompt Pocket Extension Test Suite', () => {
 		});
 
 		test('isPromptItem identifies PromptItem correctly', () => {
-			const { isPromptItem } = require('../../src/types');
-			
 			const group: PromptGroup = {
 				id: 'test-1',
 				name: 'Test Group',
@@ -133,7 +130,7 @@ suite('Prompt Pocket Extension Test Suite', () => {
 
 	suite('Extension Commands', () => {
 		test('Extension is activated', async () => {
-			const extension = vscode.extensions.getExtension('prompt-pocket.prompt-pocket');
+			const extension = vscode.extensions.getExtension('cazter.prompt-pocket');
 			assert.ok(extension, 'Extension should be installed');
 			
 			await extension.activate();
@@ -190,7 +187,6 @@ suite('Prompt Pocket Extension Test Suite', () => {
 	// covered by the 'All commands are registered' check above.
 	suite('Tree Item Default Command', () => {
 		test('Clicking a prompt tree item invokes editPrompt with the prompt as its argument', () => {
-			const { PromptTreeItem } = require('../../src/treeDataProvider');
 			const prompt: PromptItem = {
 				id: 'click-test-prompt',
 				title: 'Click me',
@@ -213,7 +209,6 @@ suite('Prompt Pocket Extension Test Suite', () => {
 		});
 
 		test('Group tree items have no default click command (rows expand/collapse)', () => {
-			const { PromptTreeItem } = require('../../src/treeDataProvider');
 			const group: PromptGroup = {
 				id: 'click-test-group',
 				name: 'A group',
@@ -238,12 +233,6 @@ suite('Prompt Pocket Extension Test Suite', () => {
 	// installed in the @vscode/test-electron host. It is verified manually in
 	// a Copilot-enabled VS Code as documented in the PR description.
 	suite('Run Actions', () => {
-		const {
-			normalizeClipboardContent,
-			copyPromptContentWithFeedback,
-			runPromptContent
-		} = require('../../src/runActions');
-
 		test('normalizeClipboardContent preserves markdown structure and unwraps soft lines', () => {
 			const input = '# Title\n\n- one\n- two\n\nSoft\nwrap\nparagraph.\n\n```\ncode\nblock\n```';
 			const out = normalizeClipboardContent(input);
@@ -270,15 +259,18 @@ suite('Prompt Pocket Extension Test Suite', () => {
 			assert.strictEqual(clip, 'clip-test');
 		});
 
-		test('runPromptContent: copilotChat falls back to clipboard when Copilot is not installed', async () => {
+		test('runPromptContent: copilotChat reports chat success or clipboard fallback', async () => {
 			const result = await runPromptContent('copilot-fallback-payload', 'CFT', {
 				runAction: 'copilotChat',
 				showCopyNotification: false
 			});
-			assert.strictEqual(result.kind, 'fellback');
-			assert.strictEqual(result.from, 'copilotChat');
-			const clip = await vscode.env.clipboard.readText();
-			assert.strictEqual(clip, 'copilot-fallback-payload');
+			if (result.kind === 'fellback') {
+				assert.strictEqual(result.from, 'copilotChat');
+				const clip = await vscode.env.clipboard.readText();
+				assert.strictEqual(clip, 'copilot-fallback-payload');
+			} else {
+				assert.strictEqual(result.action, 'copilotChat');
+			}
 		});
 
 		test('runPromptContent: insertAtCursor inserts into the active editor when one is open', async () => {

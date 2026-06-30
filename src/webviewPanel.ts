@@ -186,19 +186,25 @@ export class PromptPocketPanel {
 		}
 
 		let output = '';
+		let inFence = false;
 		for (let i = 0; i < lines.length; i++) {
 			const current = lines[i];
 			const next = i < lines.length - 1 ? lines[i + 1] : undefined;
+			const currentIsFence = /^```/.test(current.trim());
+			const nextIsFence = next !== undefined && /^```/.test(next.trim());
 			output += current;
 			if (next === undefined) {
 				break;
 			}
 
-			const keepNewline = isStructuralLine(current) || isStructuralLine(next);
+			const keepNewline = inFence || currentIsFence || nextIsFence || isStructuralLine(current) || isStructuralLine(next);
 			if (keepNewline) {
 				output += '\n';
 			} else {
 				output += ' ';
+			}
+			if (currentIsFence) {
+				inFence = !inFence;
 			}
 		}
 

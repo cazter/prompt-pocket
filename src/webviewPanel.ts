@@ -2876,13 +2876,18 @@ export class PromptPocketPanel {
 			});
 		}
 
+		// Returns true once the modal has actually been dismissed (no changes,
+		// force-closed, discarded, or saved successfully), false if the user
+		// cancelled or a save failed validation and the modal was left open.
+		// Callers that need to open something else afterward (e.g. Cmd+N)
+		// should check this before proceeding.
 		async function closePromptModal(force = false) {
 			if (!force && hasPromptModalChanges()) {
 				const choice = await showUnsavedChangesDialog();
-				if (choice === 'cancel') return;
+				if (choice === 'cancel') return false;
 				if (choice === 'save') {
 					const saved = trySavePromptModal();
-					if (!saved) return; // validation failed - keep modal open
+					if (!saved) return false; // validation failed - keep modal open
 				}
 				// 'discard' falls through to dismissal
 			}
@@ -2890,6 +2895,7 @@ export class PromptPocketPanel {
 			state.editingPrompt = null;
 			state.editingPromptGroupId = null;
 			hideMentionMenu();
+			return true;
 		}
 
 		// Group Modal
@@ -2952,17 +2958,19 @@ export class PromptPocketPanel {
 			return true;
 		}
 
+		// See closePromptModal above for the meaning of the return value.
 		async function closeGroupModal(force = false) {
 			if (!force && hasGroupModalChanges()) {
 				const choice = await showUnsavedChangesDialog();
-				if (choice === 'cancel') return;
+				if (choice === 'cancel') return false;
 				if (choice === 'save') {
 					const saved = tryGroupSaveModal();
-					if (!saved) return;
+					if (!saved) return false;
 				}
 			}
 			elements.groupModal.classList.remove('visible');
 			state.editingGroup = null;
+			return true;
 		}
 
 		// Context menu
@@ -3969,6 +3977,46 @@ export class PromptPocketPanel {
 
 		// Keyboard navigation
 		document.addEventListener('keydown', (e) => {
+			// macOS VS Code/Cursor webviews swallow Cmd+A before it reaches the
+			// browser's native select-all (github.com/microsoft/vscode#129178).
+			// Handle it ourselves for whichever field currently has focus so it
+			// keeps working in the search box and inside both modals.
+			if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+				const target = e.target;
+				if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+					e.preventDefault();
+					target.select();
+				}
+				return;
+			}
+
+			if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+				// Only intercept Cmd/Ctrl+N when this webview is actually the
+				// focused surface. Without this guard the shortcut can fire on
+				// a hidden / background panel (because retainContextWhenHidden
+				// keeps the listener alive) and the modal would then "appear"
+				// the next time the user brings the tab forward.
+				if (!document.hasFocus()) {
+					return;
+				}
+				e.preventDefault();
+				// Runs even if a modal is already open: route through the same
+				// save/discard/cancel gate used by that modal's own Close/Cancel
+				// button first, so Cmd+N can never silently discard an in-progress
+				// edit. Only once nothing is left open (or was already clean) do
+				// we open a fresh "New Prompt" modal.
+				void (async () => {
+					if (elements.promptModal.classList.contains('visible') && !(await closePromptModal())) {
+						return;
+					}
+					if (elements.groupModal.classList.contains('visible') && !(await closeGroupModal())) {
+						return;
+					}
+					openPromptModal();
+				})();
+				return;
+			}
+
 			if (elements.promptModal.classList.contains('visible') ||
 				elements.groupModal.classList.contains('visible')) {
 				if (e.key === 'Escape') {
@@ -4020,22 +4068,6 @@ export class PromptPocketPanel {
 						e.preventDefault();
 						elements.searchInput.focus();
 						elements.searchInput.select();
-					}
-					break;
-
-				case 'n':
-					if (e.ctrlKey || e.metaKey) {
-						// Only intercept Cmd/Ctrl+N when this webview is actually
-						// the focused surface. Without this guard the shortcut can
-						// fire on a hidden / background panel (because
-						// retainContextWhenHidden keeps the listener alive) and
-						// the modal would then "appear" the next time the user
-						// brings the tab forward.
-						if (!document.hasFocus()) {
-							return;
-						}
-						e.preventDefault();
-						openPromptModal();
 					}
 					break;
 			}

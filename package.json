@@ -2,7 +2,7 @@
   "name": "prompt-pocket",
   "displayName": "Prompt Pocket",
   "description": "A lightweight VS Code extension for organizing and quickly copying reusable prompts",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "cazter",
   "author": {
     "name": "Brent Allen"
@@ -147,6 +147,12 @@
         "command": "prompt-pocket.copyPromptFromPalette",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c"
+      },
+      {
+        "command": "prompt-pocket.openPanel",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "activeWebviewPanelId == 'promptPocket'"
       }
     ],
     "configuration": {

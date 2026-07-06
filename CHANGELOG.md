@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-06
+
+### Fixed
+- **Select All (Cmd/Ctrl+A) now works inside the panel.** macOS Cursor/VS Code suppresses the browser's native select-all for webview content; the search box, group name field, and prompt title/content fields now handle it explicitly.
+- **Cmd/Ctrl+N now always opens a new prompt modal, even if a modal is already open.** Previously the shortcut was silently ignored whenever the prompt or group modal was already showing. It now closes whatever's open first — routed through the same save/discard/cancel prompt used by that modal's Close button — so an in-progress edit is never silently lost.
+- **Cmd/Ctrl+N no longer also opens a new editor tab.** Cursor/VS Code forwards unhandled webview keystrokes to the workbench so global shortcuts keep working, which meant our own Cmd/Ctrl+N handling and the built-in "New File" command both fired. A scoped keybinding now claims the shortcut while the Prompt Pocket panel is focused so only the new-prompt modal opens.
+
 ## [0.2.1] - 2026-06-30
 
 ### Added
@@ -145,3 +152,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.9]: https://github.com/cazter/prompt-pocket/releases/tag/v0.1.9
 [0.2.0]: https://github.com/cazter/prompt-pocket/releases/tag/v0.2.0
 [0.2.1]: https://github.com/cazter/prompt-pocket/releases/tag/v0.2.1
+[0.2.2]: https://github.com/cazter/prompt-pocket/releases/tag/v0.2.2

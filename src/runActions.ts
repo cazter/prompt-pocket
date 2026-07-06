@@ -223,3 +223,20 @@ export async function runPromptContent(
 	const strategy = STRATEGIES[config.runAction];
 	return strategy(content, title, config);
 }
+
+/**
+ * Toast a RunResult. Shared by every Run entry point (tree inline button,
+ * context menu, and the panel's Run button) so the outcome is reported
+ * identically regardless of where Run was triggered from.
+ */
+export function showRunResultNotification(result: RunResult, showCopyNotification: boolean): void {
+	if (result.kind === 'fellback') {
+		vscode.window.showWarningMessage(result.message);
+		return;
+	}
+	// Suppress only the "Copied: ..." double-toast for the explicit clipboard
+	// action when the user has disabled copy notifications.
+	if (showCopyNotification || result.action !== 'clipboard') {
+		vscode.window.showInformationMessage(result.message);
+	}
+}

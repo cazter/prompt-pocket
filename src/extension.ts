@@ -4,7 +4,7 @@ import { PromptTreeDataProvider } from './treeDataProvider';
 import { StorageService } from './storage';
 import { PromptGroup, PromptItem, validatePromptData } from './types';
 import { PromptPocketPanel } from './webviewPanel';
-import { RunAction, copyPromptContentWithFeedback, runPromptContent } from './runActions';
+import { RunAction, copyPromptContentWithFeedback, runPromptContent, showRunResultNotification } from './runActions';
 
 export function activate(context: vscode.ExtensionContext) {
 	const storage = new StorageService(context);
@@ -72,18 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
 			runAction: getRunAction(),
 			showCopyNotification: shouldShowCopyNotification()
 		});
-		// Always toast the run outcome (independent of showCopyNotification) so
-		// the user has confirmation that the action ran AND so the fellback case
-		// surfaces clearly. The clipboard fallback inside runPromptContent already
-		// honors showCopyNotification for its own "Copied: ..." toast — this
-		// outer toast describes the run outcome itself.
-		if (result.kind === 'fellback') {
-			vscode.window.showWarningMessage(result.message);
-		} else if (shouldShowCopyNotification() || result.action !== 'clipboard') {
-			// Suppress only the "Copied: ..." double-toast for the explicit
-			// clipboard action when the user has disabled copy notifications.
-			vscode.window.showInformationMessage(result.message);
-		}
+		showRunResultNotification(result, shouldShowCopyNotification());
 	});
 
 	// Create new group

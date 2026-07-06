@@ -46,5 +46,7 @@ export const Icons = {
 
 	pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3L21 8.5M9.5 14.5L3.5 20.5M19.0001 11.5L13 17.5C13 17.5 11.5 16 9 13.5C6.5 11 5 9.5 5 9.5L11 3.5C11 3.5 12 5 14.5 7.5C17 10 19.0001 11.5 19.0001 11.5Z"/></svg>`,
 
-	pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3L21 8.5" fill="none"/><path d="M9.5 14.5L3.5 20.5" fill="none"/><path d="M19.0001 11.5L13 17.5C13 17.5 11.5 16 9 13.5C6.5 11 5 9.5 5 9.5L11 3.5C11 3.5 12 5 14.5 7.5C17 10 19.0001 11.5 19.0001 11.5Z"/></svg>`
+	pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3L21 8.5" fill="none"/><path d="M9.5 14.5L3.5 20.5" fill="none"/><path d="M19.0001 11.5L13 17.5C13 17.5 11.5 16 9 13.5C6.5 11 5 9.5 5 9.5L11 3.5C11 3.5 12 5 14.5 7.5C17 10 19.0001 11.5 19.0001 11.5Z"/></svg>`,
+
+	play: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l11-6.86a1 1 0 0 0 0-1.7l-11-6.86A1 1 0 0 0 8 5.14Z"/></svg>`
 };

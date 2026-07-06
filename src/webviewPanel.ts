@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Icons } from './icons';
+import { RunAction, runPromptContent, showRunResultNotification } from './runActions';
 import { StorageService } from './storage';
 import { GroupColor, PromptData, PromptGroup, PromptItem } from './types';
 
@@ -31,6 +32,7 @@ type WebviewMessage =
 	| { type: 'ready' }
 	| { type: 'getState' }
 	| { type: 'copy'; promptId: string }
+	| { type: 'run'; promptId: string }
 	| { type: 'createPrompt'; groupId: string; title: string; content: string }
 	| { type: 'updatePrompt'; groupId: string; promptId: string; title?: string; content?: string }
 	| { type: 'deletePrompt'; groupId: string; promptId: string }
@@ -281,6 +283,21 @@ export class PromptPocketPanel {
 					await vscode.env.clipboard.writeText(this.normalizeClipboardContent(prompt.content));
 					const config = this.getConfig();
 					this.postMessage({ type: 'copied', promptId: message.promptId, title: prompt.title, showNotification: config.showCopyNotification });
+				}
+				break;
+			}
+
+			case 'run': {
+				const data = await this.storage.load();
+				const prompt = this.findPrompt(data.groups, message.promptId);
+				if (prompt) {
+					const workspaceConfig = vscode.workspace.getConfiguration('promptPocket');
+					const showCopyNotification = workspaceConfig.get<boolean>('showCopyNotification', true);
+					const result = await runPromptContent(prompt.content, prompt.title, {
+						runAction: workspaceConfig.get<RunAction>('runAction', 'copilotChat'),
+						showCopyNotification
+					});
+					showRunResultNotification(result, showCopyNotification);
 				}
 				break;
 			}
@@ -2475,11 +2492,14 @@ export class PromptPocketPanel {
 							</div>
 							<div class="prompt-preview">\${previewHtml}</div>
 						</div>
-						<button class="prompt-copy-btn copy-btn" title="Copy to clipboard">
-							<span class="icon">${Icons.copy}</span>
-							Copy
-						</button>
-						<div class="prompt-item-actions">
+					<button class="prompt-copy-btn copy-btn" title="Copy to clipboard">
+						<span class="icon">${Icons.copy}</span>
+						Copy
+					</button>
+					<button class="btn btn-ghost btn-icon-sm run-btn" title="Run prompt">
+						<span class="icon">${Icons.play}</span>
+					</button>
+					<div class="prompt-item-actions">
 							<button class="btn btn-ghost btn-icon-sm pin-btn" title="\${pinTitle}" aria-pressed="\${isPinned}">
 								<span class="icon">\${pinIcon}</span>
 							</button>
@@ -3776,6 +3796,7 @@ export class PromptPocketPanel {
 		// Prompt list events
 		elements.promptList.addEventListener('click', (e) => {
 			const copyBtn = e.target.closest('.copy-btn');
+			const runBtn = e.target.closest('.run-btn');
 			const editBtn = e.target.closest('.edit-btn');
 			const deleteBtn = e.target.closest('.delete-btn');
 			const pinBtn = e.target.closest('.pin-btn');
@@ -3789,6 +3810,12 @@ export class PromptPocketPanel {
 			if (copyBtn) {
 				e.stopPropagation();
 				vscode.postMessage({ type: 'copy', promptId });
+				return;
+			}
+
+			if (runBtn) {
+				e.stopPropagation();
+				vscode.postMessage({ type: 'run', promptId });
 				return;
 			}
 

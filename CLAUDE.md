@@ -67,3 +67,7 @@ This lets users reopen to exactly where they left off.
 - Keyboard navigation: arrows to move, Enter to copy, Ctrl+F to search
 - Both tree view and panel stay in sync via `refreshAll()`
 - Multiline prompt editing uses temporary markdown documents in both interfaces
+
+## Markdown — no hard line breaks in prose
+
+Do **not** hard-wrap Markdown prose (fixed-column line breaks mid-sentence or mid-paragraph) in `CLAUDE.md`, docs, or other Markdown you write or revise. Write each paragraph as a single flowing line and let the editor soft-wrap. Hard line breaks are appropriate only for structural Markdown: headings, separate list items, table rows, fenced code blocks, thematic breaks, blockquote paragraph boundaries (`>` on its own line), and blank lines between blocks.

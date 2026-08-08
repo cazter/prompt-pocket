@@ -40,6 +40,7 @@ type WebviewMessage =
 	| { type: 'createGroup'; name: string; color?: GroupColor; parentId?: string }
 	| { type: 'updateGroup'; groupId: string; name?: string; color?: GroupColor }
 	| { type: 'deleteGroup'; groupId: string }
+	| { type: 'duplicateGroup'; groupId: string }
 	| { type: 'selectGroup'; groupId: string | null }
 	| { type: 'updateUIState'; state: Partial<UIState> }
 	| { type: 'reorderPrompt'; groupId: string; promptId: string; newIndex: number }
@@ -389,6 +390,33 @@ export class PromptPocketPanel {
 				break;
 			}
 
+			case 'duplicateGroup': {
+				const data = await this.storage.load();
+				const group = this.findGroup(data.groups, message.groupId);
+				if (!group) {
+					break;
+				}
+
+				const cloneGroup = (g: PromptGroup): PromptGroup => ({
+					...g,
+					id: generateId(),
+					name: `${g.name} (Copy)`,
+					children: g.children.map(cloneGroup),
+					prompts: g.prompts.map(p => ({ ...p, id: generateId() }))
+				});
+
+				const newGroup = cloneGroup(group);
+				const parentGroup = this.findParentGroup(data.groups, message.groupId);
+				if (parentGroup) {
+					await this.storage.addSubgroup(parentGroup.id, newGroup);
+				} else {
+					await this.storage.addGroup(newGroup);
+				}
+				this.postMessage({ type: 'groupCreated', group: newGroup });
+				this.refreshState();
+				break;
+			}
+
 			case 'selectGroup': {
 				await this.saveUIState({ selectedGroupId: message.groupId });
 				break;
@@ -551,6 +579,19 @@ export class PromptPocketPanel {
 				return group;
 			}
 			const found = this.findGroup(group.children, groupId);
+			if (found) {
+				return found;
+			}
+		}
+		return undefined;
+	}
+
+	private findParentGroup(groups: PromptGroup[], groupId: string): PromptGroup | undefined {
+		for (const group of groups) {
+			if (group.children.some(child => child.id === groupId)) {
+				return group;
+			}
+			const found = this.findParentGroup(group.children, groupId);
 			if (found) {
 				return found;
 			}
@@ -2297,6 +2338,39 @@ export class PromptPocketPanel {
 			return search(state.data.groups);
 		}
 
+		// Shared delete-with-confirmation path for a group and all of its
+		// subgroups/prompts. Used by both the inline trash button on the
+		// group row and the "Delete Group" button inside the group modal so
+		// the confirmation behavior (gated on promptPocket.confirmDelete)
+		// and selection cleanup stay in sync between entry points.
+		function confirmAndDeleteGroup(group) {
+			if (!group) return false;
+			if (state.config.confirmDelete && !confirm(\`Delete group "\${group.name}" and all its contents?\`)) {
+				return false;
+			}
+
+			const selectedGroupId = state.uiState.selectedGroupId;
+			if (selectedGroupId === group.id || isDescendantOf(selectedGroupId, group.id)) {
+				state.uiState.selectedGroupId = null;
+				state.selectedPromptIndex = -1;
+				vscode.postMessage({ type: 'selectGroup', groupId: null });
+			}
+
+			vscode.postMessage({ type: 'deleteGroup', groupId: group.id });
+			return true;
+		}
+
+		// Shared delete-with-confirmation path for a single prompt, used by
+		// the inline trash button on a prompt row, the right-click context
+		// menu, and the "Delete" button inside the prompt modal.
+		function confirmAndDeletePrompt(groupId, promptId, title) {
+			if (state.config.confirmDelete && !confirm(\`Delete prompt "\${title}"?\`)) {
+				return false;
+			}
+			vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
+			return true;
+		}
+
 		function findPromptGroup(promptId) {
 			function search(groups) {
 				for (const group of groups) {
@@ -2392,6 +2466,12 @@ export class PromptPocketPanel {
 							</button>
 							<button class="btn btn-ghost btn-icon-sm edit-group-btn" title="Edit">
 								<span class="icon">${Icons.edit}</span>
+							</button>
+							<button class="btn btn-ghost btn-icon-sm duplicate-group-btn" title="Duplicate">
+								<span class="icon">${Icons.copy}</span>
+							</button>
+							<button class="btn btn-ghost btn-icon-sm delete-group-btn" title="Delete">
+								<span class="icon">${Icons.delete}</span>
 							</button>
 						</div>
 					</div>
@@ -3459,15 +3539,9 @@ export class PromptPocketPanel {
 		});
 
 		elements.promptModalDelete.addEventListener('click', () => {
-			if (state.editingPrompt && state.editingPromptGroupId) {
-				if (!state.config.confirmDelete || confirm('Delete this prompt?')) {
-					vscode.postMessage({
-						type: 'deletePrompt',
-						groupId: state.editingPromptGroupId,
-						promptId: state.editingPrompt.id
-					});
-					closePromptModal(true);
-				}
+			if (state.editingPrompt && state.editingPromptGroupId &&
+				confirmAndDeletePrompt(state.editingPromptGroupId, state.editingPrompt.id, state.editingPrompt.title)) {
+				closePromptModal(true);
 			}
 		});
 
@@ -3490,12 +3564,7 @@ export class PromptPocketPanel {
 		});
 
 		elements.groupModalDelete.addEventListener('click', () => {
-			if (state.editingGroup) {
-				vscode.postMessage({ type: 'deleteGroup', groupId: state.editingGroup.id });
-				if (state.uiState.selectedGroupId === state.editingGroup.id) {
-					state.uiState.selectedGroupId = null;
-					vscode.postMessage({ type: 'selectGroup', groupId: null });
-				}
+			if (state.editingGroup && confirmAndDeleteGroup(state.editingGroup)) {
 				closeGroupModal(true);
 			}
 		});
@@ -3573,6 +3642,27 @@ export class PromptPocketPanel {
 					const group = findGroup(groupId);
 					if (group) openGroupModal(group);
 				}
+				return;
+			}
+
+			const duplicateGroupBtn = e.target.closest('.duplicate-group-btn');
+
+			if (duplicateGroupBtn && groupItem) {
+				e.stopPropagation();
+				const groupId = groupItem.dataset.groupId;
+				if (groupId) {
+					vscode.postMessage({ type: 'duplicateGroup', groupId });
+				}
+				return;
+			}
+
+			const deleteGroupBtn = e.target.closest('.delete-group-btn');
+
+			if (deleteGroupBtn && groupItem) {
+				e.stopPropagation();
+				const groupId = groupItem.dataset.groupId;
+				const group = groupId ? findGroup(groupId) : null;
+				if (group) confirmAndDeleteGroup(group);
 				return;
 			}
 
@@ -3835,7 +3925,9 @@ export class PromptPocketPanel {
 
 			if (deleteBtn) {
 				e.stopPropagation();
-				vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
+				const prompts = getVisiblePrompts();
+				const item = prompts.find(p => p.prompt.id === promptId);
+				confirmAndDeletePrompt(groupId, promptId, item ? item.prompt.title : 'this prompt');
 				return;
 			}
 
@@ -3979,9 +4071,12 @@ export class PromptPocketPanel {
 					}
 					break;
 				}
-				case 'delete':
-					vscode.postMessage({ type: 'deletePrompt', groupId, promptId });
+				case 'delete': {
+					const prompts = getVisiblePrompts();
+					const item = prompts.find(p => p.prompt.id === promptId);
+					confirmAndDeletePrompt(groupId, promptId, item ? item.prompt.title : 'this prompt');
 					break;
+				}
 			}
 			hideContextMenu();
 		});

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-08
+
+### Fixed
+- **Groups can now be deleted directly from the editor panel's navigation pane.** Each group/subgroup row previously only exposed "Create Subgroup" and "Edit" on hover, with no way to delete a group short of opening Edit and finding the "Delete Group" button buried in the modal. A trash icon now sits alongside the other hover actions, matching the sidebar tree's inline delete behavior.
+- **`promptPocket.confirmDelete` is now honored everywhere in the editor panel.** The setting ("Show confirmation dialog before deleting prompts or groups") was already respected by the sidebar tree, but the panel's own delete paths — the group modal's "Delete Group" button, a prompt row's inline delete button, and the prompt right-click context menu's Delete action — deleted immediately with no confirmation regardless of the setting. All panel delete paths (including the new group trash button) now share one confirmation helper and consistently prompt when the setting is enabled.
+- **Duplicating a subgroup no longer relocates it to the top level.** `Duplicate Group` (sidebar context menu) always added the copy as a new root-level group, even for a deeply nested subgroup, silently changing its place in the hierarchy. The duplicate is now added as a sibling under the original's parent group.
+
+### Added
+- **Duplicate Group in the editor panel.** A "Duplicate" button was added next to Edit/Delete on each group row, bringing the panel to parity with the sidebar tree's existing "Duplicate Group" context menu action (including the sibling-placement fix above).
+
 ## [0.2.3] - 2026-07-06
 
 ### Added

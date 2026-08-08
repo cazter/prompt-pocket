@@ -57,6 +57,26 @@ export function activate(context: vscode.ExtensionContext) {
 		return searchGroups(data.groups);
 	}
 
+	// Helper to find the parent group of a (sub)group, if any
+	async function findParentGroupOfGroup(groupId: string): Promise<PromptGroup | undefined> {
+		const data = await storage.load();
+
+		function searchGroups(groups: PromptGroup[]): PromptGroup | undefined {
+			for (const group of groups) {
+				if (group.children.some(child => child.id === groupId)) {
+					return group;
+				}
+				const found = searchGroups(group.children);
+				if (found) {
+					return found;
+				}
+			}
+			return undefined;
+		}
+
+		return searchGroups(data.groups);
+	}
+
 	// Copy prompt to clipboard (inline icon + context-menu Copy Prompt action).
 	const copyPromptCommand = vscode.commands.registerCommand('prompt-pocket.copyPrompt', async (item: PromptItem) => {
 		await copyPromptContentWithFeedback(item.content, item.title, {
@@ -405,7 +425,9 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage(`Duplicated: ${prompt.title}`);
 	});
 
-	// Duplicate group
+	// Duplicate group. Keeps the copy alongside the original: a subgroup's
+	// duplicate is added as a sibling subgroup under the same parent rather
+	// than being relocated to the top level.
 	const duplicateGroupCommand = vscode.commands.registerCommand('prompt-pocket.duplicateGroup', async (group: PromptGroup) => {
 		const cloneGroup = (g: PromptGroup): PromptGroup => ({
 			...g,
@@ -416,7 +438,12 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		const newGroup = cloneGroup(group);
-		await storage.addGroup(newGroup);
+		const parentGroup = await findParentGroupOfGroup(group.id);
+		if (parentGroup) {
+			await storage.addSubgroup(parentGroup.id, newGroup);
+		} else {
+			await storage.addGroup(newGroup);
+		}
 		refreshAll();
 		vscode.window.showInformationMessage(`Duplicated: ${group.name}`);
 	});
